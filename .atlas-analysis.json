@@ -1,0 +1,121 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "ChemLactica",
+  "projectDescription": "Large language models fine-tuned for small molecule generation and molecular optimization using SMILES notation.",
+  "theme": "aspen",
+  "primaryColor": "#2E7D32",
+  "lightColor": "#66BB6A",
+  "darkColor": "#1B5E20",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/models",
+              "concepts/smiles-format",
+              "concepts/molecular-properties",
+              "concepts/training-data"
+            ]
+          },
+          {
+            "group": "Training",
+            "pages": [
+              "training/pretraining",
+              "training/fine-tuning",
+              "training/rejection-sampling",
+              "training/configuration"
+            ]
+          },
+          {
+            "group": "Molecular Optimization",
+            "pages": [
+              "optimization/overview",
+              "optimization/oracle-design",
+              "optimization/optimization-algorithm",
+              "optimization/hyperparameters",
+              "optimization/examples"
+            ]
+          },
+          {
+            "group": "Generation",
+            "pages": [
+              "generation/molecule-generation",
+              "generation/prompting",
+              "generation/sampling-strategies"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/custom-oracle",
+              "guides/property-prediction",
+              "guides/benchmarking",
+              "guides/tokenization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/optimization",
+              "api/utils",
+              "api/metrics"
+            ]
+          },
+          {
+            "group": "Training",
+            "pages": [
+              "api/train",
+              "api/custom-trainer",
+              "api/datasets"
+            ]
+          },
+          {
+            "group": "Generation",
+            "pages": [
+              "api/generation",
+              "api/rejection-sampling"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Pre-trained models (Chemlactica-125M, Chemlactica-1.3B, Chemma-2B) for small molecule understanding",
+    "SMILES-based molecular representation with property annotations",
+    "Genetic-like molecular optimization algorithm with state-of-the-art performance",
+    "Property prediction fine-tuning capabilities",
+    "Custom oracle design for molecular evaluation",
+    "Rejection sampling and iterative fine-tuning strategies",
+    "Integration with RDKit for molecular fingerprinting and property calculations",
+    "Support for multiple model architectures (Galactica, Gemma)"
+  ],
+  "publicApiSurface": [
+    "chemlactica.mol_opt.optimization.optimize",
+    "chemlactica.mol_opt.utils.MoleculeEntry",
+    "chemlactica.mol_opt.utils.OptimEntry",
+    "chemlactica.mol_opt.utils.Pool",
+    "chemlactica.train.train",
+    "chemlactica.generation.generation.generate",
+    "chemlactica.rejection_sampling_ft",
+    "chemlactica.custom_trainer.CustomTrainer",
+    "chemlactica.get_dataset.get_dataset",
+    "chemlactica.mol_opt.metrics"
+  ]
+}
