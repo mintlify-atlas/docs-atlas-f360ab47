@@ -1,0 +1,349 @@
+---
+title: 'Prompt Format'
+description: 'Format prompts with molecular properties and similarity constraints for conditional generation'
+icon: 'message-code'
+---
+
+## Overview
+
+ChemLactica models use a structured prompt format to condition molecule generation on desired properties and structural similarities. Prompts are constructed using special tags that the model learned during pretraining.
+
+<Note>
+Example from the README: `</s>[SAS]2.25[/SAS][SIMILAR]CC(=O)OC1=CC=CC=C1C(=O)O 0.62[/SIMILAR][START_SMILES]` generates a molecule with SAS score ~2.25 and Tanimoto similarity ~0.62 to aspirin.
+</Note>
+
+## Prompt Structure
+
+A complete prompt follows this pattern:
+
+```
+</s>[PROPERTY_TAG]value[/PROPERTY_TAG]...[SIMILAR]SMILES similarity[/SIMILAR]...[START_SMILES]
+```
+
+### Components
+
+1. **EOS Token** (`</s>`): Marks the start of a new prompt
+2. **Property Tags**: Specify desired molecular properties
+3. **Similarity Tags**: Reference molecules with similarity scores
+4. **Start Tag**: `[START_SMILES]` signals the model to begin SMILES generation
+
+## Property Tags
+
+### Available Properties
+
+ChemLactica models understand these molecular properties from pretraining:
+
+<AccordionGroup>
+  <Accordion title="SAS - Synthetic Accessibility Score" icon="flask-vial">
+    Estimates how difficult a molecule is to synthesize.
+    
+    - **Range**: 1.0 (easy) to 10.0 (very difficult)
+    - **Typical values**: 2.0-4.0 for drug-like molecules
+    
+    ```python
+    "</s>[SAS]2.25[/SAS][START_SMILES]"
+    ```
+  </Accordion>
+
+  <Accordion title="QED - Quantitative Estimate of Drug-likeness" icon="pills">
+    Measures drug-likeness based on molecular properties.
+    
+    - **Range**: 0.0 to 1.0
+    - **Typical values**: >0.7 for drug-like molecules
+    
+    ```python
+    "</s>[QED]0.9[/QED][START_SMILES]"
+    ```
+  </Accordion>
+
+  <Accordion title="TPSA - Topological Polar Surface Area" icon="atom">
+    Surface area of polar atoms, important for membrane permeability.
+    
+    - **Range**: 0 to ~300 Ų
+    - **Typical values**: 20-140 Ų for oral bioavailability
+    
+    ```python
+    "</s>[TPSA]80[/TPSA][START_SMILES]"
+    ```
+  </Accordion>
+
+  <Accordion title="CLogP - Calculated LogP" icon="droplet">
+    Lipophilicity measure for membrane permeability.
+    
+    - **Range**: Typically -2 to 6
+    - **Typical values**: 0-5 for drug-like molecules
+    
+    ```python
+    "</s>[CLogP]2.5[/CLogP][START_SMILES]"
+    ```
+  </Accordion>
+
+  <Accordion title="Molecular Weight" icon="weight-hanging">
+    Total molecular weight in Daltons.
+    
+    - **Range**: Variable
+    - **Typical values**: 150-500 Da for drug-like molecules
+    
+    ```python
+    "</s>[MW]350[/MW][START_SMILES]"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Multiple Properties
+
+Combine multiple property tags in a single prompt:
+
+```python
+prompt = "</s>[SAS]2.5[/SAS][QED]0.85[/QED][TPSA]75[/TPSA][START_SMILES]"
+```
+
+## Similarity Constraints
+
+### SIMILAR Tag Format
+
+Reference molecules to guide structural similarity:
+
+```python
+"[SIMILAR]{reference_smiles} {similarity_score}[/SIMILAR]"
+```
+
+- **reference_smiles**: SMILES string of the reference molecule
+- **similarity_score**: Tanimoto similarity (0.0 to 1.0) using Morgan fingerprints (ECFC4)
+
+### Example: Aspirin Analogs
+
+```python
+aspirin = "CC(=O)OC1=CC=CC=C1C(=O)O"
+prompt = f"</s>[SIMILAR]{aspirin} 0.62[/SIMILAR][START_SMILES]"
+```
+
+This generates molecules with ~0.62 Tanimoto similarity to aspirin.
+
+### Multiple Similar Molecules
+
+Include multiple reference molecules:
+
+```python utils.py:175
+def create_prompt_with_similars(mol_entry: MoleculeEntry, sim_range=None):
+    """Create SIMILAR tags for reference molecules."""
+    prompt = ""
+    for sim_mol_entry in mol_entry.similar_mol_entries:
+        if sim_range:
+            # Use random similarity in range for generation
+            prompt += f"[SIMILAR]{sim_mol_entry.smiles} {generate_random_number(sim_range[0], sim_range[1]):.2f}[/SIMILAR]"
+        else:
+            # Use actual Tanimoto similarity
+            prompt += f"[SIMILAR]{sim_mol_entry.smiles} {tanimoto_dist_func(sim_mol_entry.fingerprint, mol_entry.fingerprint):.2f}[/SIMILAR]"
+    return prompt
+```
+
+<Tip>
+In optimization, similarity ranges (e.g., 0.4-0.9) are used to encourage exploration while maintaining structural relationships.
+</Tip>
+
+## Prompt Construction in Optimization
+
+The `OptimEntry.to_prompt()` method builds complete prompts for optimization:
+
+```python utils.py:197
+class OptimEntry:
+    def to_prompt(
+        self, 
+        is_generation: bool,
+        include_oracle_score: bool, 
+        config,
+        max_score
+    ):
+        """Construct prompt from molecule entries and configuration."""
+        prompt = ""
+        
+        # Add historical molecules from optimization trajectory
+        for mol_entry in self.mol_entries:
+            prompt += config["eos_token"]  # "</s>"
+            
+            # Add similar molecules
+            prompt += create_prompt_with_similars(mol_entry=mol_entry)
+            
+            # Add custom properties
+            for prop_name, prop_spec in mol_entry.add_props.items():
+                prompt += f"{prop_spec['start_tag']}{prop_spec['value']}{prop_spec['end_tag']}"
+            
+            # Add oracle score (for rejection sampling)
+            if "rej-sample-v2" in config["strategy"]:
+                if include_oracle_score:
+                    prompt += f"[PROPERTY]oracle_score {mol_entry.score:.2f}[/PROPERTY]"
+            
+            prompt += f"[START_SMILES]{mol_entry.smiles}[END_SMILES]"
+        
+        # Add final generation prompt
+        prompt += config["eos_token"]
+        
+        if is_generation:
+            # Use similarity range for exploration
+            prompt_with_similars = create_prompt_with_similars(
+                self.last_entry, 
+                sim_range=config["sim_range"]  # e.g., [0.4, 0.9]
+            )
+        else:
+            # Use actual similarities for training
+            prompt_with_similars = create_prompt_with_similars(self.last_entry)
+        
+        prompt += prompt_with_similars
+        
+        # Add properties for target molecule
+        for prop_name, prop_spec in self.last_entry.add_props.items():
+            prompt += prop_spec["start_tag"] + prop_spec["infer_value"](self.last_entry) + prop_spec["end_tag"]
+        
+        # Add desired oracle score for generation
+        if "rej-sample-v2" in config["strategy"]:
+            if is_generation:
+                desired_oracle_score = generate_random_number(
+                    max_score, 
+                    config["max_possible_oracle_score"]
+                )
+                oracle_score = desired_oracle_score
+            else:
+                oracle_score = self.last_entry.score
+            
+            if include_oracle_score:
+                prompt += f"[PROPERTY]oracle_score {oracle_score:.2f}[/PROPERTY]"
+        
+        if is_generation:
+            prompt += "[START_SMILES]"
+        else:
+            prompt += f"[START_SMILES]{self.last_entry.smiles}[END_SMILES]"
+            prompt += config["eos_token"]
+        
+        return prompt
+```
+
+## Custom Properties
+
+Define custom properties for specific optimization tasks:
+
+```python example_run.py:98
+# Define custom property specification
+additional_properties = {
+    "tpsa": {
+        "start_tag": "[TPSA]",
+        "end_tag": "[/TPSA]",
+        "calculate_value": lambda mol_entry: f"{rdMolDescriptors.CalcTPSA(mol_entry.mol):.2f}",
+        "infer_value": lambda mol_entry: f"{rdMolDescriptors.CalcTPSA(mol_entry.mol):.2f}",
+        "value": None  # Calculated later
+    }
+}
+
+# Pass to optimization
+optimize(
+    model, tokenizer,
+    oracle, config,
+    additional_properties=additional_properties
+)
+```
+
+## Oracle Score Property
+
+When using rejection sampling (`rej-sample-v2` strategy), oracle scores are included:
+
+```python utils.py:214
+if "rej-sample-v2" in config["strategy"]:
+    if include_oracle_score:
+        prompt += f"[PROPERTY]oracle_score {mol_entry.score:.2f}[/PROPERTY]"
+```
+
+This helps the model learn to generate molecules with higher oracle scores.
+
+## Example Prompts
+
+### Basic Property-Conditioned Generation
+
+```python
+# Generate drug-like molecule
+"</s>[QED]0.9[/QED][START_SMILES]"
+
+# Generate easily synthesizable molecule
+"</s>[SAS]2.0[/SAS][START_SMILES]"
+
+# Generate with specific TPSA
+"</s>[TPSA]80[/TPSA][START_SMILES]"
+```
+
+### Similarity-Guided Generation
+
+```python
+# Generate aspirin analog
+aspirin = "CC(=O)OC1=CC=CC=C1C(=O)O"
+f"</s>[SIMILAR]{aspirin} 0.7[/SIMILAR][START_SMILES]"
+
+# Multiple similar molecules
+ref1 = "CC(=O)OC1=CC=CC=C1C(=O)O"
+ref2 = "CC1=CC=CC=C1"
+f"</s>[SIMILAR]{ref1} 0.6[/SIMILAR][SIMILAR]{ref2} 0.5[/SIMILAR][START_SMILES]"
+```
+
+### Combined Constraints
+
+```python
+# Drug-like aspirin analog with good synthetic accessibility
+aspirin = "CC(=O)OC1=CC=CC=C1C(=O)O"
+f"</s>[QED]0.85[/QED][SAS]2.5[/SAS][SIMILAR]{aspirin} 0.62[/SIMILAR][START_SMILES]"
+```
+
+### Optimization with Rejection Sampling
+
+```python
+# Training prompt (is_generation=False, include_oracle_score=True)
+training_prompt = (
+    "</s>"
+    "[SIMILAR]CC(=O)OC1=CC=CC=C1C(=O)O 0.65[/SIMILAR]"
+    "[QED]0.88[/QED]"
+    "[PROPERTY]oracle_score 145.50[/PROPERTY]"
+    "[START_SMILES]CC(=O)OC1=CC=C(C=C1)C(=O)O[END_SMILES]"
+    "</s>"
+)
+
+# Generation prompt (is_generation=True)
+generation_prompt = (
+    "</s>"
+    "[SIMILAR]CC(=O)OC1=CC=C(C=C1)C(=O)O 0.75[/SIMILAR]"
+    "[QED]0.90[/QED]"
+    "[PROPERTY]oracle_score 150.00[/PROPERTY]"
+    "[START_SMILES]"
+)
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Property Values" icon="bullseye">
+    Use realistic property value ranges based on your target chemical space
+  </Card>
+  
+  <Card title="Similarity Scores" icon="arrows-left-right">
+    Balance exploration (lower similarity) and exploitation (higher similarity)
+  </Card>
+  
+  <Card title="Multiple References" icon="layer-group">
+    Include 3-5 similar molecules to guide structural features
+  </Card>
+  
+  <Card title="Prompt Length" icon="ruler">
+    Keep total prompt + generation under 2048 tokens
+  </Card>
+</CardGroup>
+
+<Warning>
+Always include the EOS token `</s>` at the start of prompts and the `[START_SMILES]` tag before generation.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Molecule Generation" icon="flask" href="/generation/molecule-generation">
+    Learn how to use prompts for generation
+  </Card>
+  <Card title="Sampling Strategies" icon="sliders" href="/generation/sampling-strategies">
+    Optimize generation with sampling parameters
+  </Card>
+</CardGroup>

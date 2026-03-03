@@ -1,0 +1,336 @@
+---
+title: 'Metrics'
+description: 'Evaluation metrics for molecular optimization'
+---
+
+## Overview
+
+The metrics module provides functions to evaluate the quality and diversity of generated molecules during optimization.
+
+---
+
+## top_auc
+
+Calculates the area under the curve (AUC) for the top-N molecules over the optimization trajectory.
+
+### Function Signature
+
+```python
+def top_auc(buffer, top_n, finish, freq_log, max_oracle_calls)
+```
+
+### Parameters
+
+<ParamField path="buffer" type="dict" required>
+  Dictionary mapping SMILES strings to tuples of `(score, call_index)`. Represents all molecules evaluated by the oracle.
+  
+  **Format:** `{smiles: (score, index), ...}`
+</ParamField>
+
+<ParamField path="top_n" type="int" required>
+  Number of top-scoring molecules to track for AUC calculation (e.g., 10 for top-10).
+</ParamField>
+
+<ParamField path="finish" type="bool" required>
+  Whether optimization finished before reaching budget. If `True` and `len(buffer) < max_oracle_calls`, the final top-N score is extrapolated to the full budget.
+</ParamField>
+
+<ParamField path="freq_log" type="int" required>
+  Frequency for logging/sampling scores (e.g., 100 means sample every 100 oracle calls).
+</ParamField>
+
+<ParamField path="max_oracle_calls" type="int" required>
+  Maximum oracle budget. Used as the denominator for AUC normalization.
+</ParamField>
+
+### Returns
+
+<ResponseField name="auc" type="float">
+  Normalized AUC score representing the average top-N performance over the optimization trajectory. Higher values indicate better and faster discovery of high-scoring molecules.
+</ResponseField>
+
+### Behavior
+
+1. Orders molecules by oracle call index (temporal order)
+2. At each `freq_log` interval, identifies top-N molecules so far
+3. Computes AUC using trapezoidal integration
+4. Normalizes by `max_oracle_calls`
+
+### Example Usage
+
+```python
+from chemlactica.mol_opt.metrics import top_auc
+
+# Oracle buffer after optimization
+buffer = {
+    "CCO": (0.85, 0),
+    "CC": (0.70, 1),
+    "CCC": (0.92, 2),
+    "CCCC": (0.88, 3),
+    # ... more molecules
+}
+
+auc_score = top_auc(
+    buffer=buffer,
+    top_n=10,
+    finish=True,
+    freq_log=100,
+    max_oracle_calls=1000
+)
+
+print(f"Top-10 AUC: {auc_score:.4f}")
+```
+
+### Use Cases
+
+- **Benchmark comparison**: Compare different optimization algorithms
+- **Early stopping**: Monitor if top-N performance plateaus
+- **Oracle efficiency**: Measure how quickly high-scoring molecules are discovered
+
+---
+
+## average_agg_tanimoto
+
+Computes average aggregated Tanimoto similarity between generated molecules and a reference set.
+
+### Function Signature
+
+```python
+def average_agg_tanimoto(
+    stock_vecs,
+    gen_vecs,
+    batch_size=5000,
+    agg='max',
+    device='cpu',
+    p=1
+)
+```
+
+### Parameters
+
+<ParamField path="stock_vecs" type="numpy.ndarray" required>
+  Reference molecule fingerprints as a 2D array of shape `(n_reference, fingerprint_dim)`.
+  
+  Typically fingerprints from a known dataset or training set.
+</ParamField>
+
+<ParamField path="gen_vecs" type="numpy.ndarray" required>
+  Generated molecule fingerprints as a 2D array of shape `(n_generated, fingerprint_dim)`.
+  
+  Must have same fingerprint dimension as `stock_vecs`.
+</ParamField>
+
+<ParamField path="batch_size" type="int" default="5000">
+  Number of molecules to process at once. Larger batches are faster but use more memory.
+</ParamField>
+
+<ParamField path="agg" type="str" default="'max'">
+  Aggregation method for finding closest reference molecule:
+  - `"max"`: For each generated molecule, find maximum similarity to any reference molecule
+  - `"mean"`: Average similarity to all reference molecules
+</ParamField>
+
+<ParamField path="device" type="str" default="'cpu'">
+  Device for computation: `"cpu"` or `"cuda"`.
+</ParamField>
+
+<ParamField path="p" type="int" default="1">
+  Power for p-mean averaging: `(mean(x^p))^(1/p)`. Use `p=1` for arithmetic mean.
+</ParamField>
+
+### Returns
+
+<ResponseField name="similarity" type="float">
+  Average Tanimoto similarity score between 0.0 and 1.0. Higher values indicate generated molecules are more similar to the reference set.
+</ResponseField>
+
+### Example Usage
+
+```python
+import numpy as np
+from chemlactica.mol_opt.metrics import average_agg_tanimoto
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+# Generate fingerprints for reference molecules
+reference_smiles = ["CCO", "CC", "CCC", "CCCC"]
+reference_fps = []
+for smi in reference_smiles:
+    mol = Chem.MolFromSmiles(smi)
+    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+    reference_fps.append(np.array(fp))
+stock_vecs = np.array(reference_fps)
+
+# Generate fingerprints for generated molecules
+generated_smiles = ["CCOCC", "CCOC", "CCCCO"]
+generated_fps = []
+for smi in generated_smiles:
+    mol = Chem.MolFromSmiles(smi)
+    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+    generated_fps.append(np.array(fp))
+gen_vecs = np.array(generated_fps)
+
+# Compute average max Tanimoto similarity
+similarity = average_agg_tanimoto(
+    stock_vecs=stock_vecs,
+    gen_vecs=gen_vecs,
+    agg='max',
+    device='cpu'
+)
+
+print(f"Average similarity to reference: {similarity:.4f}")
+```
+
+### Use Cases
+
+- **Novelty assessment**: Low similarity to known molecules indicates novelty
+- **Scaffold hopping**: Measure how different generated molecules are from starting structures
+- **Coverage**: Check if generated molecules explore diverse chemical space
+
+---
+
+## internal_diversity
+
+Measures the internal diversity of a set of molecules based on pairwise Tanimoto distances.
+
+### Function Signature
+
+```python
+def internal_diversity(
+    molecule_fingerprints,
+    device='cpu',
+    fp_type='morgan',
+    p=1
+)
+```
+
+### Parameters
+
+<ParamField path="molecule_fingerprints" type="numpy.ndarray" required>
+  Molecular fingerprints as a 2D array of shape `(n_molecules, fingerprint_dim)`.
+</ParamField>
+
+<ParamField path="device" type="str" default="'cpu'">
+  Device for computation: `"cpu"` or `"cuda"`.
+</ParamField>
+
+<ParamField path="fp_type" type="str" default="'morgan'">
+  Fingerprint type (currently not used in implementation).
+</ParamField>
+
+<ParamField path="p" type="int" default="1">
+  Power for p-mean averaging: `(mean(x^p))^(1/p)`.
+</ParamField>
+
+### Returns
+
+<ResponseField name="diversity" type="float">
+  Internal diversity score between 0.0 and 1.0. Computed as:
+  
+  `diversity = 1 - (1/|A|²) Σ(x,y in A×A) Tanimoto(x, y)`
+  
+  Higher values indicate more diverse molecule sets.
+</ResponseField>
+
+### Example Usage
+
+```python
+import numpy as np
+from chemlactica.mol_opt.metrics import internal_diversity
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+# Generate molecules
+smiles_list = [
+    "CCO",           # Ethanol
+    "CCCCCCCC",      # Octane
+    "c1ccccc1",      # Benzene
+    "CC(=O)O",       # Acetic acid
+    "CC(C)O",        # Isopropanol
+]
+
+# Compute fingerprints
+fingerprints = []
+for smi in smiles_list:
+    mol = Chem.MolFromSmiles(smi)
+    fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+    fingerprints.append(np.array(fp))
+
+mol_fps = np.array(fingerprints)
+
+# Calculate diversity
+diversity = internal_diversity(mol_fps, device='cpu')
+print(f"Internal diversity: {diversity:.4f}")
+```
+
+### Interpretation
+
+- **High diversity (greater than 0.7)**: Molecules are structurally different, good chemical space exploration
+- **Medium diversity (0.4-0.7)**: Moderate variation, typical for focused libraries
+- **Low diversity (less than 0.4)**: Very similar molecules, might indicate mode collapse
+
+### Use Cases
+
+- **Mode collapse detection**: Monitor if optimization converges to similar molecules
+- **Library design**: Ensure diverse compound libraries for screening
+- **Benchmarking**: Compare diversity across different generation methods
+
+---
+
+## Example: Comprehensive Evaluation
+
+```python
+import numpy as np
+from chemlactica.mol_opt.metrics import top_auc, internal_diversity, average_agg_tanimoto
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+def evaluate_optimization_run(oracle_buffer, generated_smiles, reference_smiles):
+    """
+    Comprehensive evaluation of an optimization run.
+    
+    Args:
+        oracle_buffer: Dict mapping SMILES to (score, index)
+        generated_smiles: List of generated SMILES
+        reference_smiles: List of reference SMILES for novelty
+    """
+    # 1. Top-10 AUC
+    auc = top_auc(
+        buffer=oracle_buffer,
+        top_n=10,
+        finish=True,
+        freq_log=100,
+        max_oracle_calls=1000
+    )
+    
+    # 2. Internal diversity
+    gen_fps = []
+    for smi in generated_smiles:
+        mol = Chem.MolFromSmiles(smi)
+        if mol:
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            gen_fps.append(np.array(fp))
+    
+    diversity = internal_diversity(np.array(gen_fps))
+    
+    # 3. Novelty (similarity to reference)
+    ref_fps = []
+    for smi in reference_smiles:
+        mol = Chem.MolFromSmiles(smi)
+        if mol:
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+            ref_fps.append(np.array(fp))
+    
+    novelty = 1 - average_agg_tanimoto(
+        stock_vecs=np.array(ref_fps),
+        gen_vecs=np.array(gen_fps),
+        agg='max'
+    )
+    
+    print(f"Results:")
+    print(f"  Top-10 AUC: {auc:.4f}")
+    print(f"  Diversity: {diversity:.4f}")
+    print(f"  Novelty: {novelty:.4f}")
+    
+    return {"auc": auc, "diversity": diversity, "novelty": novelty}
+```

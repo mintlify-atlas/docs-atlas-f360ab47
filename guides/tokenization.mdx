@@ -1,0 +1,473 @@
+---
+title: "Tokenization"
+description: "Understanding ChemLactica's tokenizer, special tokens, and molecular representation"
+---
+
+## Overview
+
+ChemLactica uses a specialized tokenizer designed for molecular SMILES strings and chemical property annotations. The tokenizer includes:
+- Standard BPE (Byte Pair Encoding) for SMILES
+- Special tokens for molecular properties
+- Custom tokens for chemical descriptors
+
+## Tokenizer Architecture
+
+### Available Tokenizers
+
+ChemLactica provides several pre-configured tokenizers:
+
+```bash
+chemlactica/tokenizer/
+├── ChemLacticaTokenizer/       # Standard tokenizer
+├── ChemLacticaTokenizer66/     # Extended tokenizer (66 special tokens)
+├── chemllama2-tokenizer/       # LLaMA2-based tokenizer
+├── GemmaTokenizer/             # Gemma-based tokenizer
+├── Mistral-7B-v0.1Tokenizer/   # Mistral-based tokenizer
+└── galactica-125m/             # Galactica tokenizer
+```
+
+<Tip>
+  **ChemLacticaTokenizer66** is recommended for most tasks as it includes comprehensive chemical property tokens.
+</Tip>
+
+### Configuration
+
+Tokenizer configuration is defined in `tokenizer_config.json`:
+
+```json tokenizer_config.json
+{
+  "clean_up_tokenization_spaces": true,
+  "model_max_length": 1000000000000000019884624838656,
+  "tokenizer_class": "PreTrainedTokenizerFast"
+}
+```
+
+## Special Tokens
+
+ChemLactica uses extensive special tokens for chemical annotations:
+
+### Core Tokens
+
+<CodeGroup>
+```json Core Tokens
+{
+  "bos_token": "<s>",
+  "eos_token": "</s>",
+  "pad_token": "<pad>"
+}
+```
+</CodeGroup>
+
+- **`<s>`**: Beginning of sequence token
+- **`</s>`**: End of sequence token (also used as separator)
+- **`<pad>`**: Padding token for batch processing
+
+### Molecular Structure Tokens
+
+```json
+[
+  "[START_SMILES]",
+  "[END_SMILES]",
+  "[SIMILAR]",
+  "[/SIMILAR]",
+  "[SYNONYM]",
+  "[/SYNONYM]",
+  "[RELATED]",
+  "[/RELATED]"
+]
+```
+
+**Usage:**
+```text
+</s>[SIMILAR]CCO 0.95[/SIMILAR][START_SMILES]CC(C)O[END_SMILES]</s>
+```
+
+### Property Tokens
+
+Chemical properties are enclosed in specific tokens:
+
+<Accordion title="View all property tokens">
+```json Property Tokens
+[
+  "[PROPERTY]", "[/PROPERTY]",
+  "[QED]", "[/QED]",
+  "[SAS]", "[/SAS]",
+  "[WEIGHT]", "[/WEIGHT]",
+  "[TPSA]", "[/TPSA]",
+  "[CLOGP]", "[/CLOGP]",
+  "[NUMHDONORS]", "[/NUMHDONORS]",
+  "[NUMHACCEPTORS]", "[/NUMHACCEPTORS]",
+  "[NUMHETEROATOMS]", "[/NUMHETEROATOMS]",
+  "[NUMROTATABLEBONDS]", "[/NUMROTATABLEBONDS]",
+  "[NOCOUNT]", "[/NOCOUNT]",
+  "[NHOHCOUNT]", "[/NHOHCOUNT]",
+  "[RINGCOUNT]", "[/RINGCOUNT]",
+  "[HEAVYATOMCOUNT]", "[/HEAVYATOMCOUNT]",
+  "[FRACTIONCSP3]", "[/FRACTIONCSP3]",
+  "[NUMAROMATICRINGS]", "[/NUMAROMATICRINGS]",
+  "[NUMSATURATEDRINGS]", "[/NUMSATURATEDRINGS]",
+  "[NUMAROMATICHETEROCYCLES]", "[/NUMAROMATICHETEROCYCLES]",
+  "[NUMAROMATICCARBOCYCLES]", "[/NUMAROMATICCARBOCYCLES]",
+  "[NUMSATURATEDHETEROCYCLES]", "[/NUMSATURATEDHETEROCYCLES]",
+  "[NUMSATURATEDCARBOCYCLES]", "[/NUMSATURATEDCARBOCYCLES]",
+  "[NUMALIPHATICRINGS]", "[/NUMALIPHATICRINGS]",
+  "[NUMALIPHATICHETEROCYCLES]", "[/NUMALIPHATICHETEROCYCLES]",
+  "[NUMALIPHATICCARBOCYCLES]", "[/NUMALIPHATICCARBOCYCLES]"
+]
+```
+</Accordion>
+
+**Common Properties:**
+
+<ResponseField name="QED" type="float">
+  Quantitative Estimate of Drug-likeness (0-1)
+  ```text
+  [QED]0.87[/QED]
+  ```
+</ResponseField>
+
+<ResponseField name="SAS" type="float">
+  Synthetic Accessibility Score (1-10)
+  ```text
+  [SAS]3.2[/SAS]
+  ```
+</ResponseField>
+
+<ResponseField name="WEIGHT" type="float">
+  Molecular weight in g/mol
+  ```text
+  [WEIGHT]324.5[/WEIGHT]
+  ```
+</ResponseField>
+
+<ResponseField name="TPSA" type="float">
+  Topological Polar Surface Area
+  ```text
+  [TPSA]45.3[/TPSA]
+  ```
+</ResponseField>
+
+<ResponseField name="CLOGP" type="float">
+  Calculated LogP (lipophilicity)
+  ```text
+  [CLOGP]2.3[/CLOGP]
+  ```
+</ResponseField>
+
+### Custom Property Tokens
+
+For domain-specific properties:
+
+```json
+[
+  "[IUPAC]", "[/IUPAC]",
+  "[VAR_NAME]", "[/VAR_NAME]",
+  "[VAR_DESC]", "[/VAR_DESC]",
+  "[VAR_VAL]", "[/VAR_VAL]",
+  "[ASSAY_NAME]", "[/ASSAY_NAME]",
+  "[ASSAY_DESC]", "[/ASSAY_DESC]"
+]
+```
+
+**Example:**
+```text
+[PROPERTY]activity 0.92[/PROPERTY]
+[ASSAY_NAME]EGFR_binding[/ASSAY_NAME]
+```
+
+## Loading the Tokenizer
+
+### Basic Usage
+
+```python
+from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained(
+    "chemlactica/tokenizer/ChemLacticaTokenizer66"
+)
+
+# Tokenize a SMILES string
+text = "</s>[START_SMILES]CCO[END_SMILES]</s>"
+tokens = tokenizer(text, return_tensors="pt")
+
+print(f"Input IDs: {tokens['input_ids']}")
+print(f"Tokens: {tokenizer.convert_ids_to_tokens(tokens['input_ids'][0])}")
+```
+
+### With Padding
+
+```python
+# For batch processing
+tokenizer = AutoTokenizer.from_pretrained(
+    "chemlactica/tokenizer/ChemLacticaTokenizer66",
+    padding_side="left"  # Important for generation
+)
+
+smiles_list = [
+    "</s>[START_SMILES]CCO[END_SMILES]</s>",
+    "</s>[START_SMILES]c1ccccc1[END_SMILES]</s>"
+]
+
+tokens = tokenizer(
+    smiles_list,
+    return_tensors="pt",
+    padding=True,
+    truncation=True,
+    max_length=512
+)
+```
+
+<Warning>
+  Always use `padding_side="left"` for causal language model generation to ensure proper attention masking.
+</Warning>
+
+## Prompt Formatting
+
+### Training Format
+
+ChemLactica uses specific prompt formats for training:
+
+```python
+def format_training_sample(smiles, similar_smiles, properties):
+    prompt = "</s>"
+    
+    # Add similar molecules
+    for sim_smiles, similarity in similar_smiles:
+        prompt += f"[SIMILAR]{sim_smiles} {similarity:.2f}[/SIMILAR]"
+    
+    # Add properties
+    for prop_name, prop_value in properties.items():
+        prompt += f"[{prop_name.upper()}]{prop_value:.2f}[/{prop_name.upper()}]"
+    
+    # Add target SMILES
+    prompt += f"[START_SMILES]{smiles}[END_SMILES]</s>"
+    
+    return prompt
+
+# Example
+sample = format_training_sample(
+    smiles="CC(C)Oc1ccccc1",
+    similar_smiles=[("CCOc1ccccc1", 0.92), ("Cc1ccccc1", 0.78)],
+    properties={"qed": 0.87, "sas": 2.1}
+)
+print(sample)
+```
+
+Output:
+```text
+</s>[SIMILAR]CCOc1ccccc1 0.92[/SIMILAR][SIMILAR]Cc1ccccc1 0.78[/SIMILAR][QED]0.87[/QED][SAS]2.10[/SAS][START_SMILES]CC(C)Oc1ccccc1[END_SMILES]</s>
+```
+
+### Generation Format
+
+For molecule generation, omit the target SMILES:
+
+```python
+def format_generation_prompt(similar_smiles, desired_properties):
+    prompt = "</s>"
+    
+    # Add similar molecules
+    for sim_smiles, similarity in similar_smiles:
+        prompt += f"[SIMILAR]{sim_smiles} {similarity:.2f}[/SIMILAR]"
+    
+    # Add desired properties
+    for prop_name, prop_value in desired_properties.items():
+        prompt += f"[{prop_name.upper()}]{prop_value:.2f}[/{prop_name.upper()}]"
+    
+    # Start generation
+    prompt += "[START_SMILES]"
+    
+    return prompt
+
+# Example
+prompt = format_generation_prompt(
+    similar_smiles=[("CCO", 0.85)],
+    desired_properties={"qed": 0.90, "weight": 250.0}
+)
+```
+
+## Tokenizer Configuration
+
+### Model Config
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class ModelConfig:
+    block_size: int = 2048
+    vocab_size: int = 50000
+    separator_token: str = "</s>"
+    separator_token_id: int = 2
+    tokenizer_path: str = "chemlactica/tokenizer/ChemLacticaTokenizer66"
+```
+
+### Resizing Token Embeddings
+
+When using a pretrained model with a custom tokenizer:
+
+```python
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("path/to/checkpoint")
+tokenizer = AutoTokenizer.from_pretrained("chemlactica/tokenizer/ChemLacticaTokenizer66")
+
+# Resize embeddings to match tokenizer
+model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+```
+
+<Tip>
+  Use `pad_to_multiple_of=8` for optimal GPU performance with tensor cores.
+</Tip>
+
+## Advanced Usage
+
+### Custom Property Tags
+
+Add custom properties for your domain:
+
+```python
+# Add custom property to prompt
+def add_custom_property(base_prompt, property_name, property_value):
+    # Use generic PROPERTY tag
+    return base_prompt + f"[PROPERTY]{property_name} {property_value:.2f}[/PROPERTY]"
+
+prompt = "</s>[SIMILAR]CCO 0.95[/SIMILAR]"
+prompt = add_custom_property(prompt, "binding_affinity", 8.5)
+prompt = add_custom_property(prompt, "selectivity", 0.92)
+prompt += "[START_SMILES]"
+```
+
+### Response Template for SFT
+
+For supervised fine-tuning, mask the prompt and only compute loss on the response:
+
+```python
+from trl import DataCollatorForCompletionOnlyLM
+
+tokenizer = AutoTokenizer.from_pretrained("chemlactica/tokenizer/ChemLacticaTokenizer66")
+
+# Define where the response starts
+response_template = tokenizer.encode("[PROPERTY]activity")
+
+collator = DataCollatorForCompletionOnlyLM(
+    response_template,
+    tokenizer=tokenizer
+)
+
+# Use with SFTTrainer
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=dataset,
+    data_collator=collator,
+    ...
+)
+```
+
+### Extracting Generated SMILES
+
+```python
+import re
+
+def extract_smiles(generated_text):
+    """Extract SMILES from generated text."""
+    start_tag = "[START_SMILES]"
+    end_tag = "[END_SMILES]"
+    
+    start_idx = generated_text.rfind(start_tag)
+    end_idx = generated_text.rfind(end_tag)
+    
+    if start_idx == -1 or end_idx == -1:
+        return None
+    
+    smiles = generated_text[start_idx + len(start_tag):end_idx]
+    return smiles.strip()
+
+# Example
+output = model.generate(input_ids, max_new_tokens=128)
+decoded = tokenizer.decode(output[0])
+smiles = extract_smiles(decoded)
+
+if smiles:
+    print(f"Generated SMILES: {smiles}")
+else:
+    print("No valid SMILES found")
+```
+
+## Tokenizer Statistics
+
+### Vocabulary Size
+
+```python
+tokenizer = AutoTokenizer.from_pretrained("chemlactica/tokenizer/ChemLacticaTokenizer66")
+
+print(f"Vocabulary size: {len(tokenizer)}")
+print(f"Number of special tokens: {len(tokenizer.all_special_tokens)}")
+print(f"Special tokens: {tokenizer.all_special_tokens[:10]}...")  # First 10
+```
+
+### Token Length Analysis
+
+```python
+def analyze_tokenization(smiles_list, tokenizer):
+    lengths = []
+    for smiles in smiles_list:
+        tokens = tokenizer(smiles, return_tensors="pt")
+        lengths.append(len(tokens['input_ids'][0]))
+    
+    print(f"Average token length: {np.mean(lengths):.2f}")
+    print(f"Max token length: {np.max(lengths)}")
+    print(f"Min token length: {np.min(lengths)}")
+    
+    return lengths
+
+# Test on dataset
+smiles_list = [...]
+lengths = analyze_tokenization(smiles_list, tokenizer)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Token Consistency">
+    - Always use the same tokenizer for training and inference
+    - Save tokenizer configuration with model checkpoints
+    - Verify special token IDs match between tokenizer and model
+  </Accordion>
+
+  <Accordion title="Sequence Length">
+    - Monitor token lengths in your dataset
+    - Set appropriate `max_seq_length` for SFT (typically 512-2048)
+    - Use `truncation=True` to handle long sequences
+    - Consider sequence length distribution when batching
+  </Accordion>
+
+  <Accordion title="Special Token Usage">
+    - Use specific property tokens when available (e.g., `[QED]` instead of `[PROPERTY]qed`)
+    - Keep property values formatted consistently (2 decimal places)
+    - Always wrap SMILES in `[START_SMILES]...[END_SMILES]`
+    - Use `</s>` as both EOS and separator token
+  </Accordion>
+
+  <Accordion title="Padding Strategy">
+    - Use `padding_side="left"` for generation tasks
+    - Use `padding_side="right"` for classification tasks
+    - Enable `pad_to_multiple_of=8` for optimal GPU utilization
+    - Set `padding=True` for batch processing
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  The tokenizer is critical for model performance. Using the wrong tokenizer or configuration can lead to poor results or errors.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Oracles" icon="bullseye" href="/guides/custom-oracle">
+    Build oracles using property tokens
+  </Card>
+  <Card title="Property Prediction" icon="chart-line" href="/guides/property-prediction">
+    Fine-tune models with property annotations
+  </Card>
+</CardGroup>

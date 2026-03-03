@@ -1,0 +1,533 @@
+---
+title: Hyperparameter Configuration
+description: Configure the optimization algorithm with YAML files for your specific use case
+---
+
+The optimization process is controlled by a YAML configuration file that specifies model paths, pool settings, generation parameters, and optional fine-tuning configuration.
+
+## Configuration File Structure
+
+Here's the complete `chemlactica_125m_hparams.yaml` from the repository:
+
+```yaml
+# Model configuration
+checkpoint_path: yerevann/chemlactica-125m
+tokenizer_path: yerevann/chemlactica-125m
+device: cuda:0
+
+# Pool and optimization settings
+pool_size: 10
+validation_perc: 0.2
+num_mols: 0
+num_similars: 5
+num_gens_per_iter: 200
+sim_range: [0.4, 0.9]
+
+# Generation settings
+num_processes: 8
+generation_batch_size: 200
+eos_token: "</s>"
+generation_temperature: [1.0, 1.5]
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+
+# Optimization strategy
+strategy: [rej-sample-v2]  # or [default]
+
+# Fine-tuning configuration (for rej-sample-v2)
+rej_sample_config:
+  train_tol_level: 3
+  checkpoints_dir: checkpoints
+  max_learning_rate: 0.0001
+  lr_end: 0
+  train_batch_size: 2
+  gradient_accumulation_steps: 8
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  warmup_steps: 10
+  global_gradient_norm: 1.0
+  dataloader_num_workers: 1
+  max_seq_length: 2048
+  num_train_epochs: 5
+  packing: false
+```
+
+## Core Parameters
+
+### Model Configuration
+
+<ParamField path="checkpoint_path" type="str" required>
+  Path or HuggingFace model ID for the ChemLactica model
+  
+  **Options:**
+  - `yerevann/chemlactica-125m` (recommended for most tasks)
+  - `yerevann/chemlactica-1.3b` (better performance, more memory)
+  - `yerevann/chemma-2b` (best performance)
+  - Local path to fine-tuned checkpoint
+</ParamField>
+
+<ParamField path="tokenizer_path" type="str" required>
+  Path or HuggingFace model ID for the tokenizer (usually same as checkpoint)
+</ParamField>
+
+<ParamField path="device" type="str" default="cuda:0">
+  Device to run the model on
+  
+  **Options:**
+  - `cuda:0`, `cuda:1`, etc. (GPU)
+  - `cpu` (not recommended, very slow)
+</ParamField>
+
+### Pool Settings
+
+<ParamField path="pool_size" type="int" default="10">
+  Number of top molecules to maintain in the pool
+  
+  **Trade-offs:**
+  - **Smaller (5-10):** Faster iterations, more focused search
+  - **Larger (20-50):** More diversity, better exploration
+  
+  **Recommendation:** Start with 10. Increase for multi-modal objectives.
+</ParamField>
+
+<ParamField path="validation_perc" type="float" default="0.2">
+  Percentage of pool reserved for validation during fine-tuning
+  
+  **Recommendation:** 0.2 (20%) works well. Decrease if pool_size < 10.
+</ParamField>
+
+<ParamField path="num_similars" type="int" default="5">
+  Number of similar molecules to include in each generation prompt
+  
+  **Trade-offs:**
+  - **Fewer (1-3):** More exploration, less guidance
+  - **More (5-10):** Tighter control, local search
+  
+  **Recommendation:** 5 for most tasks. Reduce to 2-3 for exploration.
+</ParamField>
+
+<ParamField path="num_gens_per_iter" type="int" default="200">
+  Number of unique molecules to generate per iteration
+  
+  **Trade-offs:**
+  - **Smaller (50-100):** Faster iterations, more fine-tuning rounds
+  - **Larger (200-500):** Fewer iterations, more generation per round
+  
+  **Recommendation:** 200 balances speed and coverage.
+</ParamField>
+
+### Similarity Range
+
+<ParamField path="sim_range" type="List[float]" default="[0.4, 0.9]">
+  Range of Tanimoto similarities to use in generation prompts
+  
+  The algorithm samples random similarities in this range when creating prompts.
+  
+  **Trade-offs:**
+  - **Narrow (0.6-0.8):** Local search around known molecules
+  - **Wide (0.3-0.9):** Broader exploration
+  
+  **Recommendation:** [0.4, 0.9] for balanced search.
+</ParamField>
+
+## Generation Parameters
+
+<ParamField path="generation_batch_size" type="int" default="200">
+  Number of molecules to generate in parallel per batch
+  
+  **Constraint:** Should match or exceed `num_gens_per_iter` for efficiency.
+</ParamField>
+
+<ParamField path="generation_temperature" type="List[float]" default="[1.0, 1.5]">
+  Temperature range for generation (start, end)
+  
+  Temperature increases linearly from start to end during optimization.
+  
+  **Trade-offs:**
+  - **Lower (0.8-1.0):** More conservative, higher quality
+  - **Higher (1.2-1.5):** More diverse, creative solutions
+  
+  **Recommendation:** [1.0, 1.5] for most tasks.
+</ParamField>
+
+<ParamField path="eos_token" type="str" default="</s>">
+  End-of-sequence token for the model
+  
+  **Don't change** unless using a different base model.
+</ParamField>
+
+### generation_config
+
+These parameters are passed directly to HuggingFace's `model.generate()`:
+
+<ParamField path="generation_config.max_new_tokens" type="int" default="100">
+  Maximum number of tokens to generate
+  
+  **Recommendation:** 100 is sufficient for most molecules (SMILES rarely exceed this).
+</ParamField>
+
+<ParamField path="generation_config.do_sample" type="bool" default="true">
+  Whether to use sampling (vs. greedy decoding)
+  
+  **Must be true** for molecular optimization to work.
+</ParamField>
+
+<ParamField path="generation_config.repetition_penalty" type="float" default="1.0">
+  Penalty for repeating tokens (1.0 = no penalty)
+  
+  **Recommendation:** Keep at 1.0. Higher values can break SMILES syntax.
+</ParamField>
+
+<ParamField path="generation_config.eos_token_id" type="int" default="20">
+  Token ID for end-of-sequence
+  
+  **Don't change** unless using a different tokenizer.
+</ParamField>
+
+## Optimization Strategy
+
+<ParamField path="strategy" type="List[str]" required>
+  Optimization strategy to use
+  
+  **Options:**
+  - `[default]` - No fine-tuning, use pre-trained model only
+  - `[rej-sample-v2]` - Adaptive fine-tuning on high-scoring molecules
+  
+  **Recommendation:** Use `[rej-sample-v2]` for best results.
+</ParamField>
+
+## Fine-tuning Configuration (rej_sample_config)
+
+These parameters control the adaptive fine-tuning process:
+
+### Training Trigger
+
+<ParamField path="rej_sample_config.train_tol_level" type="int" default="3">
+  Number of iterations without improvement before triggering fine-tuning
+  
+  **Trade-offs:**
+  - **Lower (1-2):** Frequent fine-tuning, slower iterations
+  - **Higher (4-6):** More generation, less adaptation
+  
+  **Recommendation:** 3 for most tasks.
+</ParamField>
+
+### Learning Rate
+
+<ParamField path="rej_sample_config.max_learning_rate" type="float" default="0.0001">
+  Peak learning rate for fine-tuning
+  
+  **Recommendation:** 1e-4 works well. Decrease to 5e-5 for larger models.
+</ParamField>
+
+<ParamField path="rej_sample_config.lr_end" type="float" default="0">
+  Final learning rate (polynomial decay)
+  
+  **Recommendation:** Keep at 0.
+</ParamField>
+
+<ParamField path="rej_sample_config.warmup_steps" type="int" default="10">
+  Number of warmup steps for learning rate schedule
+  
+  **Recommendation:** 10 for small pool sizes.
+</ParamField>
+
+### Batch Size and Gradient Accumulation
+
+<ParamField path="rej_sample_config.train_batch_size" type="int" default="2">
+  Per-device batch size during fine-tuning
+  
+  **Constraint:** Limited by GPU memory.
+  
+  **Recommendation:**
+  - 125M model: 2-4
+  - 1.3B model: 1-2
+  - 2B model: 1
+</ParamField>
+
+<ParamField path="rej_sample_config.gradient_accumulation_steps" type="int" default="8">
+  Number of steps to accumulate gradients
+  
+  **Effective batch size** = `train_batch_size × gradient_accumulation_steps`
+  
+  **Recommendation:** Adjust to achieve effective batch size of 8-16.
+</ParamField>
+
+### Regularization
+
+<ParamField path="rej_sample_config.weight_decay" type="float" default="0.1">
+  L2 regularization strength
+  
+  **Recommendation:** 0.1 prevents overfitting to small pool.
+</ParamField>
+
+<ParamField path="rej_sample_config.global_gradient_norm" type="float" default="1.0">
+  Maximum gradient norm for clipping
+  
+  **Recommendation:** 1.0 for stable training.
+</ParamField>
+
+### Training Duration
+
+<ParamField path="rej_sample_config.num_train_epochs" type="int" default="5">
+  Number of epochs to fine-tune per round
+  
+  **Trade-offs:**
+  - **Fewer (2-3):** Faster, less adaptation
+  - **More (5-10):** Better adaptation, risk of overfitting
+  
+  **Recommendation:** 5 with early stopping based on validation loss.
+</ParamField>
+
+### Other Settings
+
+<ParamField path="rej_sample_config.checkpoints_dir" type="str" default="checkpoints">
+  Directory to save fine-tuning checkpoints
+</ParamField>
+
+<ParamField path="rej_sample_config.dataloader_num_workers" type="int" default="1">
+  Number of workers for data loading
+</ParamField>
+
+<ParamField path="rej_sample_config.max_seq_length" type="int" default="2048">
+  Maximum sequence length for training
+</ParamField>
+
+<ParamField path="rej_sample_config.packing" type="bool" default="false">
+  Whether to pack multiple examples into one sequence
+  
+  **Recommendation:** Keep false for molecular optimization.
+</ParamField>
+
+<ParamField path="rej_sample_config.adam_beta1" type="float" default="0.9">
+  Adam optimizer beta1 parameter
+</ParamField>
+
+<ParamField path="rej_sample_config.adam_beta2" type="float" default="0.999">
+  Adam optimizer beta2 parameter
+</ParamField>
+
+## Example Configurations
+
+### Fast Exploration (Default Strategy)
+
+```yaml
+checkpoint_path: yerevann/chemlactica-125m
+tokenizer_path: yerevann/chemlactica-125m
+device: cuda:0
+
+pool_size: 10
+validation_perc: 0.2
+num_similars: 3
+num_gens_per_iter: 200
+sim_range: [0.3, 0.9]
+
+generation_batch_size: 200
+generation_temperature: [1.0, 1.5]
+eos_token: "</s>"
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+
+strategy: [default]
+```
+
+**Use for:**
+- Quick experiments
+- Simple objectives
+- Limited GPU memory
+- Objectives similar to pre-training
+
+### High-Performance (Rejection Sampling)
+
+```yaml
+checkpoint_path: yerevann/chemlactica-1.3b
+tokenizer_path: yerevann/chemlactica-1.3b
+device: cuda:0
+
+pool_size: 20
+validation_perc: 0.2
+num_similars: 5
+num_gens_per_iter: 200
+sim_range: [0.4, 0.9]
+
+generation_batch_size: 200
+generation_temperature: [1.0, 1.5]
+eos_token: "</s>"
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+
+strategy: [rej-sample-v2]
+
+rej_sample_config:
+  train_tol_level: 3
+  checkpoints_dir: checkpoints
+  max_learning_rate: 0.00005
+  lr_end: 0
+  train_batch_size: 1
+  gradient_accumulation_steps: 16
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  warmup_steps: 10
+  global_gradient_norm: 1.0
+  dataloader_num_workers: 1
+  max_seq_length: 2048
+  num_train_epochs: 5
+  packing: false
+```
+
+**Use for:**
+- Challenging benchmarks (PMO, docking)
+- Novel objectives
+- Maximum performance
+- When you have GPU resources
+
+### Multi-Objective Optimization
+
+```yaml
+checkpoint_path: yerevann/chemlactica-125m
+tokenizer_path: yerevann/chemlactica-125m
+device: cuda:0
+
+pool_size: 30  # Larger pool for diverse optima
+validation_perc: 0.2
+num_similars: 5
+num_gens_per_iter: 300
+sim_range: [0.4, 0.9]
+
+generation_batch_size: 300
+generation_temperature: [1.2, 1.5]  # Higher for exploration
+eos_token: "</s>"
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+
+strategy: [rej-sample-v2]
+
+rej_sample_config:
+  train_tol_level: 4  # More exploration before fine-tuning
+  checkpoints_dir: checkpoints
+  max_learning_rate: 0.0001
+  lr_end: 0
+  train_batch_size: 2
+  gradient_accumulation_steps: 8
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  warmup_steps: 10
+  global_gradient_norm: 1.0
+  dataloader_num_workers: 1
+  max_seq_length: 2048
+  num_train_epochs: 5
+  packing: false
+```
+
+**Use for:**
+- Multiple competing objectives
+- Pareto frontier exploration
+- Highly constrained search spaces
+
+## Loading Configuration
+
+Load your configuration in Python:
+
+```python
+import yaml
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Load config
+config = yaml.safe_load(open("config.yaml"))
+
+# Load model and tokenizer
+model = AutoModelForCausalLM.from_pretrained(
+    config["checkpoint_path"],
+    torch_dtype=torch.bfloat16
+).to(config["device"])
+
+tokenizer = AutoTokenizer.from_pretrained(
+    config["tokenizer_path"],
+    padding_side="left"
+)
+
+# Set max_possible_oracle_score
+config["max_possible_oracle_score"] = oracle.max_possible_oracle_score
+
+# Set log directory
+config["log_dir"] = "results/optimization.log"
+
+# Run optimization
+from chemlactica.mol_opt.optimization import optimize
+optimize(model, tokenizer, oracle, config)
+```
+
+## Hyperparameter Tuning Tips
+
+<AccordionGroup>
+  <Accordion title="Start with defaults">
+    The provided `chemlactica_125m_hparams.yaml` works well for most tasks. Start there and adjust only if needed.
+  </Accordion>
+
+  <Accordion title="Monitor intermediate results">
+    Check oracle logs during optimization:
+    ```
+    1000/5000 | avg_top1: 85.2 | avg_top10: 78.3 | avg_top100: 65.1
+    ```
+    
+    If scores plateau early, try:
+    - Increasing `generation_temperature[1]` for more exploration
+    - Decreasing `train_tol_level` for earlier fine-tuning
+    - Increasing `pool_size` for more diversity
+  </Accordion>
+
+  <Accordion title="GPU memory issues">
+    If you run out of memory:
+    - Use smaller model (125M instead of 1.3B)
+    - Reduce `train_batch_size` and increase `gradient_accumulation_steps`
+    - Reduce `generation_batch_size`
+    - Use `torch_dtype=torch.bfloat16` for model loading
+  </Accordion>
+
+  <Accordion title="Slow optimization">
+    To speed up:
+    - Use `strategy: [default]` (no fine-tuning)
+    - Increase `generation_batch_size` (if memory allows)
+    - Reduce `num_train_epochs` in fine-tuning
+    - Use smaller model (125M)
+  </Accordion>
+
+  <Accordion title="Poor diversity">
+    If getting too many similar molecules:
+    - Increase `generation_temperature[1]`
+    - Widen `sim_range` (e.g., [0.3, 0.95])
+    - Increase `pool_size`
+    - Decrease `num_similars`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="See Complete Examples" icon="code" href="/optimization/examples">
+    Explore full working examples with different configurations
+  </Card>
+  <Card title="Understand the Algorithm" icon="gears" href="/optimization/optimization-algorithm">
+    Learn how hyperparameters affect the optimization process
+  </Card>
+</CardGroup>

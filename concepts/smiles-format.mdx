@@ -1,0 +1,270 @@
+---
+title: SMILES Format
+description: Understanding SMILES notation for molecular representation in ChemLactica
+---
+
+## What is SMILES?
+
+SMILES (Simplified Molecular Input Line Entry System) is a notation that represents molecular structures as linear strings of characters. ChemLactica models use SMILES as the primary representation format for small organic molecules.
+
+<Note>
+  SMILES allows complex molecular structures to be represented as simple text strings, making them perfect for processing with language models.
+</Note>
+
+## SMILES in ChemLactica
+
+### Special Tags
+
+ChemLactica uses special tags to mark SMILES strings in the input:
+
+```python chemlactica/utils/text_format_utils.py
+SPECIAL_TAGS = {
+    "SMILES": {"start": "[START_SMILES]", "end": "[END_SMILES]"},
+    # ... other tags
+}
+```
+
+### Example Usage
+
+```python
+# Aspirin molecule
+smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"
+
+# Formatted for ChemLactica
+formatted = "[START_SMILES]CC(=O)OC1=CC=CC=C1C(=O)O[END_SMILES]"
+```
+
+## Canonical SMILES
+
+ChemLactica internally converts all SMILES to their canonical form for consistency:
+
+```python chemlactica/mol_opt/utils.py
+from rdkit import Chem
+
+def canonicalize(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    return Chem.MolToSmiles(mol, canonical=True)
+```
+
+<Tip>
+  Canonical SMILES ensures that the same molecule always has the same string representation, regardless of how it was originally written.
+</Tip>
+
+### Why Canonicalization Matters
+
+The same molecule can be written in multiple ways:
+
+```python
+# These all represent the same molecule (ethanol)
+"CCO"           # canonical
+"OCC"           # alternative
+"C(O)C"         # another alternative
+
+# After canonicalization, all become:
+"CCO"
+```
+
+## SMILES Syntax Basics
+
+### Atoms
+
+<ParamField path="Organic atoms" type="string">
+  Atoms like C, N, O, P, S, F, Cl, Br, I can be written directly
+  
+  ```
+  C   = Carbon
+  N   = Nitrogen  
+  O   = Oxygen
+  ```
+</ParamField>
+
+<ParamField path="Bracket atoms" type="string">
+  Other atoms or atoms with charges/isotopes use brackets
+  
+  ```
+  [Cu]   = Copper
+  [O-]   = Oxygen anion
+  [13C]  = Carbon-13 isotope
+  ```
+</ParamField>
+
+### Bonds
+
+```python
+# Single bond (implicit)
+"CC"      # ethane: C-C
+
+# Double bond
+"C=C"     # ethene: C=C
+
+# Triple bond  
+"C#C"     # ethyne: C≡C
+
+# Aromatic bond
+"c1ccccc1" # benzene (aromatic)
+```
+
+### Branches
+
+```python
+# Parentheses indicate branches
+"CC(C)C"   # isobutane: has a branch
+"CC(C)(C)C" # neopentane: two branches on same carbon
+```
+
+### Rings
+
+```python
+# Numbers indicate ring closures
+"C1CCCCC1"  # cyclohexane: 6-membered ring
+"C1CC1"     # cyclopropane: 3-membered ring
+"c1ccccc1"  # benzene: aromatic ring
+```
+
+## SMILES Examples from ChemLactica
+
+Here are real examples from the codebase:
+
+### Simple Molecules
+
+```python chemlactica/utils/utils.py
+# Example from test code
+prompt = "[START_SMILES] CCCCN [END_SMILES][CLOGP 0.00][SAS 123][QED]"
+```
+
+### With Properties and Similarity
+
+```python
+# From README example - generating similar molecule
+prompt = """</s>[SAS]2.25[/SAS]
+[SIMILAR]CC(=O)OC1=CC=CC=C1C(=O)O 0.62[/SIMILAR]
+[START_SMILES]"""
+
+# This generates a molecule with:
+# - SAS score around 2.25
+# - Similarity ~0.62 to aspirin (CC(=O)OC1=CC=CC=C1C(=O)O)
+```
+
+### Molecular Optimization Context
+
+```python chemlactica/mol_opt/utils.py
+def create_prompt_with_similars(mol_entry: MoleculeEntry, sim_range=None):
+    prompt = ""
+    for sim_mol_entry in mol_entry.similar_mol_entries:
+        if sim_range:
+            prompt += f"[SIMILAR]{sim_mol_entry.smiles} {generate_random_number(sim_range[0], sim_range[1]):.2f}[/SIMILAR]"
+        else:
+            prompt += f"[SIMILAR]{sim_mol_entry.smiles} {tanimoto_dist_func(sim_mol_entry.fingerprint, mol_entry.fingerprint):.2f}[/SIMILAR]"
+    return prompt
+```
+
+## Working with SMILES in ChemLactica
+
+### Converting SMILES to Molecular Objects
+
+```python chemlactica/mol_opt/utils.py
+from rdkit import Chem
+
+class MoleculeEntry:
+    def __init__(self, smiles, score=0, **kwargs):
+        self.smiles = smiles
+        self.score = score
+        if smiles:
+            self.smiles = canonicalize(smiles)
+            self.mol = Chem.MolFromSmiles(smiles)
+            self.fingerprint = get_morgan_fingerprint(self.mol)
+```
+
+### Validation
+
+```python
+from rdkit import Chem
+
+def is_valid_smiles(smiles):
+    """Check if a SMILES string is valid"""
+    mol = Chem.MolFromSmiles(smiles)
+    return mol is not None
+```
+
+## Advanced SMILES Features
+
+### Stereochemistry
+
+```python
+# Cis/trans isomerism
+"C/C=C/C"   # trans-2-butene
+"C/C=C\\C"   # cis-2-butene
+
+# Chiral centers  
+"C[C@H](O)CC"   # (S)-2-butanol
+"C[C@@H](O)CC"  # (R)-2-butanol
+```
+
+### Aromatic Systems
+
+```python
+# Lowercase letters indicate aromatic atoms
+"c1ccccc1"      # benzene
+"c1ccc2ccccc2c1" # naphthalene
+```
+
+## Common Molecules in SMILES
+
+<AccordionGroup>
+  <Accordion title="Drug Molecules">
+    ```python
+    # Aspirin
+    "CC(=O)OC1=CC=CC=C1C(=O)O"
+    
+    # Ibuprofen  
+    "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O"
+    
+    # Caffeine
+    "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
+    ```
+  </Accordion>
+
+  <Accordion title="Simple Organic Molecules">
+    ```python
+    # Ethanol
+    "CCO"
+    
+    # Acetic acid
+    "CC(=O)O"
+    
+    # Benzene
+    "c1ccccc1"
+    
+    # Glucose
+    "C(C1C(C(C(C(O1)O)O)O)O)O"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## SMILES Resources
+
+<CardGroup cols={2}>
+  <Card title="RDKit Documentation" icon="book" href="https://www.rdkit.org/docs/GettingStartedInPython.html#smiles">
+    Official RDKit SMILES guide
+  </Card>
+  <Card title="Daylight SMILES Theory" icon="lightbulb" href="https://www.daylight.com/dayhtml/doc/theory/theory.smiles.html">
+    Original SMILES specification
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Molecular Properties" icon="flask" href="/concepts/molecular-properties">
+    Learn about calculated properties
+  </Card>
+  <Card title="Model Architectures" icon="atom" href="/concepts/models">
+    Explore the model family
+  </Card>
+  <Card title="Training Data" icon="database" href="/concepts/training-data">
+    Understand the corpus
+  </Card>
+  <Card title="Generation Guide" icon="wand-magic-sparkles" href="/guides/generation">
+    Generate molecules
+  </Card>
+</CardGroup>

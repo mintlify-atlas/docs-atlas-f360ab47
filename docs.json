@@ -1,122 +1,111 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "ChemLactica",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#2E7D32",
+    "light": "#66BB6A",
+    "dark": "#1B5E20"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/YerevaNN/ChemLactica"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/YerevaNN/ChemLactica"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/models",
+              "concepts/smiles-format",
+              "concepts/molecular-properties",
+              "concepts/training-data"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Training",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "training/pretraining",
+              "training/fine-tuning",
+              "training/rejection-sampling",
+              "training/configuration"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Molecular Optimization",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "optimization/overview",
+              "optimization/oracle-design",
+              "optimization/optimization-algorithm",
+              "optimization/hyperparameters",
+              "optimization/examples"
+            ]
+          },
+          {
+            "group": "Generation",
+            "pages": [
+              "generation/molecule-generation",
+              "generation/prompting",
+              "generation/sampling-strategies"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/custom-oracle",
+              "guides/property-prediction",
+              "guides/benchmarking",
+              "guides/tokenization"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Core API",
             "pages": [
-              "api-reference/introduction"
+              "api/optimization",
+              "api/utils",
+              "api/metrics"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Training",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/train",
+              "api/custom-trainer",
+              "api/datasets"
+            ]
+          },
+          {
+            "group": "Generation",
+            "pages": [
+              "api/generation",
+              "api/rejection-sampling"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

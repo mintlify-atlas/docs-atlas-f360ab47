@@ -1,0 +1,333 @@
+---
+title: Molecular Properties
+description: Comprehensive guide to molecular properties calculated and used by ChemLactica models
+---
+
+## Overview
+
+ChemLactica models understand and can predict a wide range of molecular properties. These properties are encoded using special tags in the training data and can be used to guide molecule generation and optimization.
+
+## Core Properties
+
+These are the most commonly used properties in ChemLactica:
+
+### QED (Quantitative Estimate of Drug-likeness)
+
+<ParamField path="QED" type="float" required>
+  A measure of how drug-like a molecule is, ranging from 0 to 1.
+  
+  ```python chemlactica/generation/rejection_sampling_utils.py
+  from rdkit.Chem.QED import qed
+  
+  drug_likeness = qed(mol)
+  ```
+</ParamField>
+
+<Tip>
+  Higher QED values (closer to 1) indicate more drug-like molecules. Typically, values above 0.5 are considered favorable for drug candidates.
+</Tip>
+
+**Tag format**: `[QED]0.95[/QED]`
+
+### SAS (Synthetic Accessibility Score)
+
+<ParamField path="SAS" type="float" required>
+  Estimates how difficult it is to synthesize a molecule, ranging from 1 (easy) to 10 (very difficult).
+</ParamField>
+
+**Tag format**: `[SAS]2.25[/SAS]`
+
+**Example from README**:
+```python
+# Generate molecule with SAS around 2.25
+prompt = "</s>[SAS]2.25[/SAS][START_SMILES]"
+```
+
+### TPSA (Topological Polar Surface Area)
+
+<ParamField path="TPSA" type="float" required>
+  The surface area of polar atoms in a molecule (Ų), important for predicting drug absorption.
+  
+  ```python chemlactica/mol_opt/example_run.py
+  from rdkit.Chem import rdMolDescriptors
+  
+  tpsa = rdMolDescriptors.CalcTPSA(molecule.mol)
+  ```
+</ParamField>
+
+<Note>
+  TPSA values under 140 Ų typically indicate good oral bioavailability. Lower TPSA generally means better membrane permeability.
+</Note>
+
+**Tag format**: `[TPSA]63.06[/TPSA]`
+
+### CLogP (Partition Coefficient)
+
+<ParamField path="CLOGP" type="float" required>
+  Measures lipophilicity (how well a molecule dissolves in fats vs water). Important for drug absorption and distribution.
+</ParamField>
+
+**Tag format**: `[CLOGP]2.45[/CLOGP]`
+
+<Tip>
+  Optimal CLogP values for drugs typically range from 0 to 5. Too high indicates poor water solubility; too low indicates poor membrane permeability.
+</Tip>
+
+### Molecular Weight
+
+<ParamField path="WEIGHT" type="float" required>
+  The exact molecular weight in Daltons (Da).
+  
+  ```python chemlactica/mol_opt/example_run.py
+  weight = rdMolDescriptors.CalcExactMolWt(molecule.mol)
+  ```
+</ParamField>
+
+**Tag format**: `[WEIGHT]325.10[/WEIGHT]`
+
+## Structural Properties
+
+These properties describe the molecular structure:
+
+### Hydrogen Bond Donors and Acceptors
+
+<ParamField path="NUMHDONORS" type="int">
+  Number of hydrogen bond donor groups (like -OH, -NH)
+</ParamField>
+
+<ParamField path="NUMHACCEPTORS" type="int">
+  Number of hydrogen bond acceptor groups (like =O, -N-)
+</ParamField>
+
+**Tag format**: 
+```
+[NUMHDONORS]2[/NUMHDONORS]
+[NUMHACCEPTORS]4[/NUMHACCEPTORS]
+```
+
+### Atom Counts
+
+<ParamField path="NUMHETEROATOMS" type="int">
+  Number of non-carbon, non-hydrogen atoms (heteroatoms)
+</ParamField>
+
+<ParamField path="HEAVYATOMCOUNT" type="int">
+  Total number of non-hydrogen atoms
+</ParamField>
+
+<ParamField path="NOCOUNT" type="int">
+  Number of nitrogen and oxygen atoms
+</ParamField>
+
+<ParamField path="NHOHCOUNT" type="int">
+  Number of NH and OH groups
+</ParamField>
+
+**Tag format**:
+```
+[NUMHETEROATOMS]5[/NUMHETEROATOMS]
+[HEAVYATOMCOUNT]24[/HEAVYATOMCOUNT]
+```
+
+### Bond Properties
+
+<ParamField path="NUMROTATABLEBONDS" type="int">
+  Number of rotatable bonds, indicates molecular flexibility
+</ParamField>
+
+<ParamField path="FRACTIONCSP3" type="float">
+  Fraction of sp³ hybridized carbons (saturated carbons)
+</ParamField>
+
+**Tag format**:
+```
+[NUMROTATABLEBONDS]8[/NUMROTATABLEBONDS]
+[FRACTIONCSP3]0.32[/FRACTIONCSP3]
+```
+
+## Ring Properties
+
+Detailed information about ring systems in molecules:
+
+### Basic Ring Counts
+
+```python chemlactica/mol_opt/example_run.py
+from rdkit.Chem import rdMolDescriptors
+
+num_rings = rdMolDescriptors.CalcNumRings(molecule.mol)
+```
+
+<ParamField path="RINGCOUNT" type="int">
+  Total number of rings in the molecule
+</ParamField>
+
+<ParamField path="NUMAROMATICRINGS" type="int">
+  Number of aromatic rings (like benzene)
+</ParamField>
+
+<ParamField path="NUMSATURATEDRINGS" type="int">
+  Number of saturated (non-aromatic) rings
+</ParamField>
+
+<ParamField path="NUMALIPHATICRINGS" type="int">
+  Number of aliphatic (non-aromatic) rings
+</ParamField>
+
+### Hetero vs Carbocyclic Rings
+
+<AccordionGroup>
+  <Accordion title="Aromatic Rings">
+    <ParamField path="NUMAROMATICHETEROCYCLES" type="int">
+      Aromatic rings containing heteroatoms (like pyridine)
+    </ParamField>
+    
+    <ParamField path="NUMAROMATICCARBOCYCLES" type="int">
+      Aromatic rings with only carbon atoms (like benzene)
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="Saturated Rings">
+    <ParamField path="NUMSATURATEDHETEROCYCLES" type="int">
+      Saturated rings containing heteroatoms (like piperidine)
+    </ParamField>
+    
+    <ParamField path="NUMSATURATEDCARBOCYCLES" type="int">
+      Saturated rings with only carbon atoms (like cyclohexane)
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="Aliphatic Rings">
+    <ParamField path="NUMALIPHATICHETEROCYCLES" type="int">
+      Aliphatic rings containing heteroatoms
+    </ParamField>
+    
+    <ParamField path="NUMALIPHATICCARBOCYCLES" type="int">
+      Aliphatic rings with only carbon atoms
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+## Molecular Similarity
+
+### Tanimoto Similarity
+
+ChemLactica uses Tanimoto similarity over Morgan fingerprints (ECFC4) to measure molecular similarity:
+
+```python chemlactica/mol_opt/utils.py
+from rdkit import DataStructs
+from rdkit.Chem import AllChem
+
+def get_morgan_fingerprint(mol):
+    return AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+
+def tanimoto_dist_func(fing1, fing2, fingerprint: str = "morgan"):
+    return DataStructs.TanimotoSimilarity(fing1, fing2)
+```
+
+<Note>
+  Morgan fingerprints (also called ECFC4 - Extended Connectivity Fingerprints, diameter 4) capture the local chemical environment around each atom up to 2 bonds away.
+</Note>
+
+**Tag format**: `[SIMILAR]CC(=O)OC1=CC=CC=C1C(=O)O 0.62[/SIMILAR]`
+
+### Similarity Ranges
+
+- **0.0 - 0.3**: Very different molecules
+- **0.3 - 0.5**: Some structural similarity
+- **0.5 - 0.7**: Moderate similarity
+- **0.7 - 0.9**: High similarity
+- **0.9 - 1.0**: Very similar (1.0 = identical)
+
+## Property Tags Reference
+
+Complete list from the codebase:
+
+```python chemlactica/utils/text_format_utils.py
+SPECIAL_TAGS = {
+    "SMILES": {"start": "[START_SMILES]", "end": "[END_SMILES]"},
+    "similarity": {"start": "[SIMILAR]", "end": "[/SIMILAR]", "type": float},
+    "SAS": {"start": "[SAS]", "end": "[/SAS]", "type": float},
+    "WEIGHT": {"start": "[WEIGHT]", "end": "[/WEIGHT]", "type": float},
+    "TPSA": {"start": "[TPSA]", "end": "[/TPSA]", "type": float},
+    "CLOGP": {"start": "[CLOGP]", "end": "[/CLOGP]", "type": float},
+    "QED": {"start": "[QED]", "end": "[/QED]", "type": float},
+    "FRACTIONCSP3": {"start": "[FRACTIONCSP3]", "end": "[/FRACTIONCSP3]", "type": float},
+    # ... and many more
+}
+```
+
+## Custom Properties
+
+You can also define custom properties for fine-tuning and optimization:
+
+```python
+# Generic property tag
+"[PROPERTY]oracle_score 0.85[/PROPERTY]"
+
+# Used in rejection sampling for optimization
+"[PROPERTY]oracle_score {mol_entry.score:.2f}[/PROPERTY]"
+```
+
+## Property-Guided Generation
+
+### Example: Generate High QED Molecule
+
+```python chemlactica/generation/rejection_sampling_utils.py
+input_text = f"</s>[QED]{random.uniform(0.9, 0.99):.2f}[/QED][START_SMILES]"
+```
+
+### Example: TPSA + Weight Oracle
+
+From the optimization example:
+
+```python chemlactica/mol_opt/example_run.py
+class TPSA_Weight_Oracle:
+    def __call__(self, molecules: List[MoleculeEntry]):
+        oracle_scores = []
+        for molecule in molecules:
+            try:
+                tpsa = rdMolDescriptors.CalcTPSA(molecule.mol)
+                oracle_score = tpsa
+                weight = rdMolDescriptors.CalcExactMolWt(molecule.mol)
+                num_rings = rdMolDescriptors.CalcNumRings(molecule.mol)
+                
+                # Apply constraints
+                if weight >= 350:
+                    oracle_score = 0
+                if num_rings < 2:
+                    oracle_score = 0
+            except Exception as e:
+                oracle_score = 0
+                
+            oracle_scores.append(oracle_score)
+        return oracle_scores
+```
+
+## Property Formatting
+
+<Warning>
+  Float properties are always formatted to 2 decimal places in the training data:
+  
+  ```python chemlactica/utils/text_format_utils.py
+  if SPECIAL_TAGS[key].get("type") is float:
+      value = "{:.2f}".format(float(value))
+      assert len(value.split(".")[-1]) == 2
+  ```
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Molecular Optimization" icon="chart-line" href="/guides/optimization">
+    Use properties for optimization
+  </Card>
+  <Card title="SMILES Format" icon="code" href="/concepts/smiles-format">
+    Learn about molecular representation
+  </Card>
+  <Card title="Model Architectures" icon="atom" href="/concepts/models">
+    Explore the models
+  </Card>
+  <Card title="Property Prediction" icon="crystal-ball" href="/guides/property-prediction">
+    Fine-tune for predictions
+  </Card>
+</CardGroup>

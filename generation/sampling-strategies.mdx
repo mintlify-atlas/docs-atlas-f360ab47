@@ -1,0 +1,463 @@
+---
+title: 'Sampling Strategies'
+description: 'Configure sampling parameters to control molecule generation quality and diversity'
+icon: 'sliders'
+---
+
+## Overview
+
+Sampling strategies control how ChemLactica models select tokens during generation, balancing between generating high-quality molecules and exploring diverse chemical space.
+
+## Generation Configuration
+
+Generation parameters are specified in the `generation_config` section of your optimization configuration:
+
+```yaml chemlactica_125m_hparams.yaml:15
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+```
+
+## Key Parameters
+
+### Temperature
+
+Controls randomness in token selection. Higher values increase diversity.
+
+<ParamField path="temperature" type="float" default="1.0">
+  Sampling temperature for generation.
+  
+  - **Range**: 0.1 to 2.0
+  - **Lower values** (0.5-0.8): More conservative, higher quality
+  - **Medium values** (1.0-1.2): Balanced exploration
+  - **Higher values** (1.3-1.5): More diverse, creative generation
+</ParamField>
+
+#### Dynamic Temperature
+
+During optimization, temperature increases over time to enhance exploration:
+
+```python optimization.py:169
+if num_iter > initial_num_iter:
+    config["generation_config"]["temperature"] += \
+        config["num_gens_per_iter"] / (oracle.budget - config["num_gens_per_iter"]) * \
+        (config["generation_temperature"][1] - config["generation_temperature"][0])
+    print(f"Generation temperature: {config['generation_config']['temperature']}")
+```
+
+Configuration:
+
+```yaml chemlactica_125m_hparams.yaml:13
+generation_temperature: [1.0, 1.5]  # [start, end]
+```
+
+<Tip>
+Start with temperature 1.0 and gradually increase to 1.5 during optimization to balance exploitation early and exploration later.
+</Tip>
+
+### Max New Tokens
+
+Maximum number of tokens to generate for each molecule.
+
+<ParamField path="max_new_tokens" type="int" default="100">
+  Maximum tokens to generate.
+  
+  - **Typical SMILES**: 50-100 tokens
+  - **Small molecules**: 50 tokens
+  - **Drug-like molecules**: 100 tokens
+  - **Complex molecules**: 150+ tokens
+</ParamField>
+
+```yaml
+generation_config:
+  max_new_tokens: 100  # Suitable for most drug-like molecules
+```
+
+<Warning>
+Ensure `max_new_tokens` + prompt length ≤ 2048 (model's context window).
+</Warning>
+
+### Repetition Penalty
+
+Penalizes repeated token sequences to encourage diversity.
+
+<ParamField path="repetition_penalty" type="float" default="1.0">
+  Penalty for repeating tokens.
+  
+  - **1.0**: No penalty (default)
+  - **1.1-1.2**: Mild penalty for variety
+  - **1.3+**: Strong penalty (may reduce quality)
+</ParamField>
+
+```yaml
+generation_config:
+  repetition_penalty: 1.0  # Typically kept at 1.0 for molecules
+```
+
+<Note>
+Repetition penalty is usually kept at 1.0 for molecule generation, as molecular structures naturally contain repeated patterns (rings, functional groups).
+</Note>
+
+### Sampling Mode
+
+<ParamField path="do_sample" type="bool" default="true">
+  Whether to use sampling or greedy decoding.
+  
+  - **true**: Sample from probability distribution (diverse outputs)
+  - **false**: Always select highest probability token (deterministic)
+</ParamField>
+
+```yaml
+generation_config:
+  do_sample: true  # Required for diverse molecule generation
+```
+
+### EOS Token
+
+<ParamField path="eos_token_id" type="int" default="20">
+  Token ID that signals end of generation.
+  
+  ChemLactica uses token ID 20 as the EOS token.
+</ParamField>
+
+```yaml
+generation_config:
+  eos_token_id: 20
+```
+
+## Advanced Parameters
+
+Additional parameters available for fine-grained control:
+
+### Beam Search
+
+<ParamField path="num_beams" type="int" default="1">
+  Number of beams for beam search. Set to 1 for sampling.
+</ParamField>
+
+<ParamField path="num_beam_groups" type="int" default="1">
+  Number of groups for diverse beam search.
+</ParamField>
+
+### Sequence Control
+
+<ParamField path="num_return_sequences" type="int" default="1">
+  Number of sequences to return per prompt.
+</ParamField>
+
+```python rejection_sampling_configs.py:8
+rej_sample_args = {
+    "max_new_tokens": 300,
+    "temperature": 1.0,
+    "repetition_penalty": 1.0,
+    "do_sample": True,
+    "num_return_sequences": 20,  # Generate 20 molecules per prompt
+    "eos_token_id": 20,
+}
+```
+
+<ParamField path="diversity_penalty" type="float" default="0.0">
+  Penalty for generating similar sequences when `num_return_sequences` > 1.
+</ParamField>
+
+<ParamField path="length_penalty" type="float" default="1.0">
+  Penalty for sequence length. Values > 1.0 encourage longer sequences.
+</ParamField>
+
+## Configuration Examples
+
+### Conservative Generation (High Quality)
+
+```yaml
+generation_config:
+  max_new_tokens: 100
+  temperature: 0.8
+  repetition_penalty: 1.0
+  do_sample: true
+  eos_token_id: 20
+```
+
+Best for:
+- Property prediction tasks
+- When you need valid, realistic molecules
+- Early stages of optimization
+
+### Balanced Generation (Default)
+
+```yaml
+generation_config:
+  max_new_tokens: 100
+  temperature: 1.0
+  repetition_penalty: 1.0
+  do_sample: true
+  eos_token_id: 20
+```
+
+Best for:
+- General molecule generation
+- Most optimization tasks
+- Standard use cases
+
+### Exploratory Generation (High Diversity)
+
+```yaml
+generation_config:
+  max_new_tokens: 100
+  temperature: 1.4
+  repetition_penalty: 1.1
+  do_sample: true
+  eos_token_id: 20
+```
+
+Best for:
+- Late-stage optimization
+- Exploring novel chemical space
+- When stuck in local optima
+
+### Rejection Sampling Generation
+
+```python rejection_sampling_configs.py:1
+sample_gen_args = {
+    "max_new_tokens": 50,
+    "temperature": 1.0,
+    "repetition_penalty": 1.0,
+    "do_sample": True,
+    "eos_token_id": 2
+}
+
+rej_sample_args = {
+    "max_new_tokens": 300,
+    "temperature": 1.0,
+    "repetition_penalty": 1.0,
+    "do_sample": True,
+    "num_return_sequences": 20,
+    "eos_token_id": 20,
+}
+```
+
+Best for:
+- Optimization with iterative fine-tuning
+- Generating many candidates per iteration
+- Complex optimization landscapes
+
+## Complete Optimization Configuration
+
+Example configuration from `chemlactica_125m_hparams.yaml`:
+
+```yaml chemlactica_125m_hparams.yaml:1
+checkpoint_path: yerevann/chemlactica-125m
+tokenizer_path: yerevann/chemlactica-125m
+pool_size: 10
+validation_perc: 0.2
+num_mols: 0
+num_similars: 5
+num_gens_per_iter: 200
+device: cuda:0
+sim_range: [0.4, 0.9]
+num_processes: 8
+generation_batch_size: 200
+eos_token: "</s>"
+generation_temperature: [1.0, 1.5]
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+
+strategy: [rej-sample-v2]
+
+rej_sample_config:
+  train_tol_level: 3
+  checkpoints_dir: checkpoints
+  max_learning_rate: 0.0001
+  lr_end: 0
+  train_batch_size: 2
+  gradient_accumulation_steps: 8
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  warmup_steps: 10
+  global_gradient_norm: 1.0
+  dataloader_num_workers: 1
+  max_seq_length: 2048
+  num_train_epochs: 5
+  packing: false
+```
+
+## Optimization-Specific Parameters
+
+### Similarity Range
+
+<ParamField path="sim_range" type="list[float]" default="[0.4, 0.9]">
+  Range for random similarity values in prompts during generation.
+  
+  - Encourages exploration within structural constraints
+  - Lower bound controls minimum similarity
+  - Upper bound controls maximum similarity
+</ParamField>
+
+```yaml
+sim_range: [0.4, 0.9]  # Generate molecules 40-90% similar to references
+```
+
+### Generation Batch Size
+
+<ParamField path="generation_batch_size" type="int" default="200">
+  Number of molecules to generate in parallel per batch.
+  
+  Limited by GPU memory and model size.
+</ParamField>
+
+```yaml
+generation_batch_size: 200  # For 125M model on 16GB GPU
+```
+
+### Generations Per Iteration
+
+<ParamField path="num_gens_per_iter" type="int" default="200">
+  Total unique molecules to generate per optimization iteration.
+</ParamField>
+
+```yaml
+num_gens_per_iter: 200  # Oracle calls per iteration
+```
+
+## Usage in Code
+
+### Loading Configuration
+
+```python example_run.py:97
+import yaml
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Load configuration
+config = yaml.safe_load(open("hparams.yaml"))
+
+# Load model
+model = AutoModelForCausalLM.from_pretrained(
+    config["checkpoint_path"],
+    torch_dtype=torch.bfloat16
+).to(config["device"])
+
+tokenizer = AutoTokenizer.from_pretrained(
+    config["tokenizer_path"],
+    padding_side="left"
+)
+
+# Generate with config parameters
+output = model.generate(
+    **data,
+    **config["generation_config"]
+)
+```
+
+### Passing to Optimization
+
+```python example_run.py:108
+from chemlactica.mol_opt.optimization import optimize
+
+# Configuration contains all generation parameters
+optimize(
+    model, tokenizer,
+    oracle, config  # Includes generation_config
+)
+```
+
+## Tuning Guidelines
+
+<Steps>
+  <Step title="Start with defaults">
+    Use `temperature=1.0`, `do_sample=true`, `max_new_tokens=100`
+  </Step>
+  
+  <Step title="Adjust for task">
+    - High quality needed: Lower temperature to 0.8
+    - More diversity needed: Raise temperature to 1.2-1.4
+  </Step>
+  
+  <Step title="Monitor validity">
+    Track percentage of valid SMILES generated. If too low, decrease temperature.
+  </Step>
+  
+  <Step title="Optimize batch size">
+    Increase `generation_batch_size` until GPU memory is utilized
+  </Step>
+  
+  <Step title="Dynamic temperature">
+    Use temperature schedule to start conservative and increase exploration
+  </Step>
+</Steps>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Low validity rate" icon="triangle-exclamation">
+    **Problem**: Many invalid SMILES generated
+    
+    **Solutions**:
+    - Lower temperature (try 0.8-0.9)
+    - Reduce `max_new_tokens`
+    - Check prompt format
+  </Accordion>
+
+  <Accordion title="Insufficient diversity" icon="clone">
+    **Problem**: Generated molecules too similar
+    
+    **Solutions**:
+    - Increase temperature (try 1.2-1.4)
+    - Widen `sim_range` (e.g., [0.3, 0.95])
+    - Set `repetition_penalty` to 1.1
+  </Accordion>
+
+  <Accordion title="Context length exceeded" icon="text-slash">
+    **Problem**: Prompts + generation exceed 2048 tokens
+    
+    **Solutions**:
+    - Reduce `max_new_tokens`
+    - Limit number of similar molecules in prompt
+    - Truncate prompt history
+  </Accordion>
+
+  <Accordion title="OOM errors" icon="memory">
+    **Problem**: GPU out of memory during generation
+    
+    **Solutions**:
+    - Reduce `generation_batch_size`
+    - Use smaller model (125M vs 1.3B)
+    - Enable gradient checkpointing
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Temperature Schedule" icon="temperature-half">
+    Start conservative (0.8-1.0), increase for exploration (1.2-1.5)
+  </Card>
+  
+  <Card title="Validation" icon="check">
+    Always validate generated SMILES with RDKit before scoring
+  </Card>
+  
+  <Card title="Batch Size" icon="layer-group">
+    Maximize batch size for GPU efficiency without OOM
+  </Card>
+  
+  <Card title="Token Budget" icon="coins">
+    Monitor token usage to stay within 2048 context window
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Molecule Generation" icon="flask" href="/generation/molecule-generation">
+    Apply sampling strategies to generate molecules
+  </Card>
+  <Card title="Optimization" icon="chart-line" href="/optimization/overview">
+    Use generation in molecular optimization workflows
+  </Card>
+</CardGroup>

@@ -1,0 +1,328 @@
+---
+title: Rejection sampling
+description: API reference for rejection sampling fine-tuning
+---
+
+Rejection sampling is an iterative fine-tuning strategy that generates molecules, scores them with an oracle, and fine-tunes the model on high-scoring examples.
+
+## Main Function
+
+```python
+from chemlactica.rejection_sampling_ft import fine_tune
+
+def fine_tune(
+    from_pretrained: str,
+    model_config_name: str,
+    valid_data_dir: str,
+    rounds: int,
+    steps_per_round: int,
+    eval_steps: int,
+    save_steps: int,
+    train_batch_size: int,
+    max_learning_rate: float,
+    experiment_name: str,
+    checkpoints_root_dir: str,
+    dataloader_num_workers: int,
+    use_flash_attn: bool,
+    gradient_accumulation_steps: int,
+    gradient_checkpointing: bool,
+    device: str,
+    seed: int,
+    track: bool = False,
+    track_dir: str = None,
+    check_reproducability: bool = False,
+    valid_batch_size: int = None,
+    profile: bool = False,
+    profile_dir: str = None
+)
+```
+
+*Source: `rejection_sampling_ft.py:57`*
+
+## Parameters
+
+<ParamField path="from_pretrained" type="str" required>
+  Path to pretrained model checkpoint or Hugging Face model ID.
+</ParamField>
+
+<ParamField path="model_config_name" type="str" required>
+  Model configuration name (e.g., "125m", "1.3b").
+</ParamField>
+
+<ParamField path="valid_data_dir" type="str" required>
+  Directory containing validation data.
+</ParamField>
+
+<ParamField path="rounds" type="int" required>
+  Number of rejection sampling rounds to perform.
+</ParamField>
+
+<ParamField path="steps_per_round" type="int" required>
+  Training steps per rejection sampling round.
+</ParamField>
+
+<ParamField path="eval_steps" type="int" required>
+  Evaluate model every N steps.
+</ParamField>
+
+<ParamField path="save_steps" type="int" required>
+  Save checkpoint every N steps.
+</ParamField>
+
+<ParamField path="train_batch_size" type="int" required>
+  Training batch size per device.
+</ParamField>
+
+<ParamField path="max_learning_rate" type="float" required>
+  Maximum learning rate for polynomial decay schedule.
+</ParamField>
+
+<ParamField path="experiment_name" type="str" required>
+  Name for this training run.
+</ParamField>
+
+<ParamField path="checkpoints_root_dir" type="str" required>
+  Root directory for saving checkpoints.
+</ParamField>
+
+<ParamField path="dataloader_num_workers" type="int" required>
+  Number of workers for data loading.
+</ParamField>
+
+<ParamField path="use_flash_attn" type="bool" required>
+  Whether to use Flash Attention for efficient training.
+</ParamField>
+
+<ParamField path="gradient_accumulation_steps" type="int" required>
+  Number of gradient accumulation steps.
+</ParamField>
+
+<ParamField path="gradient_checkpointing" type="bool" required>
+  Whether to use gradient checkpointing to save memory.
+</ParamField>
+
+<ParamField path="device" type="str" required>
+  Device to use for training (e.g., "cuda", "cpu").
+</ParamField>
+
+<ParamField path="seed" type="int" required>
+  Random seed for reproducibility.
+</ParamField>
+
+<ParamField path="track" type="bool" default="False">
+  Whether to enable experiment tracking (Aim).
+</ParamField>
+
+<ParamField path="track_dir" type="str" default="None">
+  Directory for experiment tracking logs.
+</ParamField>
+
+## Rejection Sampling Workflow
+
+The rejection sampling process follows these steps:
+
+<Steps>
+  <Step title="Generate candidates">
+    Generate molecules using the current model with specified prompts.
+  </Step>
+  
+  <Step title="Score with oracle">
+    Evaluate generated molecules using a scoring function (e.g., QED, docking score).
+  </Step>
+  
+  <Step title="Select top performers">
+    Filter molecules based on score thresholds and similarity constraints.
+  </Step>
+  
+  <Step title="Fine-tune on selected data">
+    Train the model on high-scoring molecules for N steps.
+  </Step>
+  
+  <Step title="Repeat">
+    Continue for the specified number of rounds.
+  </Step>
+</Steps>
+
+## Generation Configuration
+
+```python
+from chemlactica.generation.rejection_sampling_configs import GenerationConfig
+
+config = GenerationConfig(
+    max_new_tokens=128,
+    temperature=1.0,
+    do_sample=True,
+    num_return_sequences=10,
+    repetition_penalty=1.2,
+    eos_token_id=tokenizer.eos_token_id,
+    pad_token_id=tokenizer.pad_token_id
+)
+```
+
+### GenerationConfig Parameters
+
+<ParamField path="max_new_tokens" type="int" default="128">
+  Maximum number of new tokens to generate.
+</ParamField>
+
+<ParamField path="temperature" type="float" default="1.0">
+  Sampling temperature for diversity.
+</ParamField>
+
+<ParamField path="do_sample" type="bool" default="True">
+  Whether to use sampling (vs greedy decoding).
+</ParamField>
+
+<ParamField path="num_return_sequences" type="int" default="1">
+  Number of sequences to generate per prompt.
+</ParamField>
+
+<ParamField path="repetition_penalty" type="float" default="1.0">
+  Penalty for repeating tokens (greater than 1.0 discourages repetition).
+</ParamField>
+
+## Scoring Configuration
+
+```python
+from chemlactica.generation.rejection_sampling_utils import ScoringConfig
+
+scoring_config = ScoringConfig(
+    metric="qed",  # or "tanimoto", "custom"
+    threshold=0.9,
+    similarity_threshold=0.4,
+    reference_smiles="CC(=O)OC1=CC=CC=C1C(=O)O"
+)
+```
+
+### ScoringConfig Parameters
+
+<ParamField path="metric" type="str" required>
+  Scoring metric to use:
+  - `"qed"`: Quantitative Estimate of Drug-likeness
+  - `"tanimoto"`: Tanimoto similarity to reference
+  - `"custom"`: Custom scoring function
+</ParamField>
+
+<ParamField path="threshold" type="float" required>
+  Minimum score threshold for acceptance.
+</ParamField>
+
+<ParamField path="similarity_threshold" type="float">
+  Minimum Tanimoto similarity to reference molecule (when using similarity constraints).
+</ParamField>
+
+<ParamField path="reference_smiles" type="str">
+  Reference SMILES for similarity-constrained optimization.
+</ParamField>
+
+## Example Usage
+
+```python
+import torch
+from chemlactica.rejection_sampling_ft import fine_tune
+
+# Configure rejection sampling fine-tuning
+fine_tune(
+    from_pretrained="yerevann/chemlactica-125m",
+    model_config_name="125m",
+    valid_data_dir="./validation_data",
+    rounds=10,
+    steps_per_round=100,
+    eval_steps=50,
+    save_steps=100,
+    train_batch_size=8,
+    max_learning_rate=5e-5,
+    experiment_name="chemlactica_qed_optimization",
+    checkpoints_root_dir="./checkpoints",
+    dataloader_num_workers=4,
+    use_flash_attn=True,
+    gradient_accumulation_steps=4,
+    gradient_checkpointing=True,
+    device="cuda",
+    seed=42,
+    track=True,
+    track_dir="./aim_logs"
+)
+```
+
+## Custom Trainer
+
+The rejection sampling uses `CustomIterativeSFTTrainer` which extends the standard trainer:
+
+```python
+from chemlactica.custom_trainer import CustomIterativeSFTTrainer
+
+trainer = CustomIterativeSFTTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    formatting_func=lambda x: x["text"],
+    callbacks=callbacks
+)
+
+# Train for one round
+trainer.train()
+```
+
+## Learning Rate Schedule
+
+Rejection sampling uses polynomial decay with warmup:
+
+```python
+from transformers import get_polynomial_decay_schedule_with_warmup
+
+scheduler = get_polynomial_decay_schedule_with_warmup(
+    optimizer=optimizer,
+    num_warmup_steps=warmup_steps,
+    num_training_steps=total_steps,
+    power=1.0  # Linear decay
+)
+```
+
+## Data Format
+
+Generated data is stored in JSONL format:
+
+```json
+{"text": "</s>[SAS]2.5[/SAS][QED]0.85[/QED][START_SMILES]CC(=O)OC1=CC=CC=C1C(=O)O[END_SMILES]", "score": 0.85}
+{"text": "</s>[MW]300[/MW][TPSA]50[/TPSA][START_SMILES]COc1ccc(C=O)cc1[END_SMILES]", "score": 0.78}
+```
+
+## Monitoring Progress
+
+Track rejection sampling with Aim:
+
+```python
+fine_tune(
+    ...,
+    track=True,
+    track_dir="./aim_logs"
+)
+```
+
+View results:
+
+```bash
+aim up --repo ./aim_logs
+```
+
+## Notes
+
+<Note>
+  Rejection sampling can significantly improve molecule generation quality by focusing the model on high-scoring examples.
+</Note>
+
+<Warning>
+  Use appropriate score thresholds to avoid overfitting to a narrow region of chemical space. Monitor diversity metrics during training.
+</Warning>
+
+<Tip>
+  Start with a smaller number of rounds (5-10) and evaluate before scaling up. Excessive rounds can lead to mode collapse.
+</Tip>
+
+## See Also
+
+- [Rejection Sampling Guide](/training/rejection-sampling) - Detailed guide
+- [optimize()](/api/optimization) - Molecular optimization API
+- [CustomTrainer](/api/custom-trainer) - Custom trainer implementation

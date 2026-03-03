@@ -1,0 +1,383 @@
+---
+title: 'Pretraining Models'
+description: 'Learn how to pretrain ChemLactica models from scratch or continue training'
+---
+
+## Overview
+
+ChemLactica supports pretraining language models on chemical data using the `train.py` script. The training system is built on top of Hugging Face Transformers with custom features for efficient distributed training.
+
+## Quick Start
+
+<Steps>
+  <Step title="Prepare Your Data">
+    Organize your training data in JSONL format in directories. You'll need:
+    - Training data directories (can be multiple)
+    - Validation data directory
+    - Data type labels for each directory
+  </Step>
+  
+  <Step title="Choose Model Configuration">
+    Select a model configuration from the available options:
+    - `125m` - 125 million parameter model
+    - `1.3b` - 1.3 billion parameter model
+    - `6.7b` - 6.7 billion parameter model
+    - `mistral7b` - Mistral 7B based model
+    - `llama2` - Llama 2 based model
+  </Step>
+  
+  <Step title="Run Training">
+    Execute the training script with your configuration.
+  </Step>
+</Steps>
+
+## Basic Training Command
+
+```bash
+python chemlactica/train.py \
+  --train_type pretrain \
+  --from_pretrained facebook/galactica-125m \
+  --model_config 125m \
+  --training_data_dirs /path/to/train/data \
+  --dir_data_types smiles \
+  --valid_data_dir /path/to/valid/data \
+  --train_batch_size 16 \
+  --eval_steps 500 \
+  --save_steps 1000 \
+  --max_steps 10000 \
+  --checkpoints_root_dir ./checkpoints \
+  --experiment_name my_experiment
+```
+
+## Command-Line Arguments
+
+### Required Arguments
+
+<ParamField path="--train_type" type="string" required>
+  Type of training to perform. Options: `pretrain`, `sft`, `isft`, `dpo`
+</ParamField>
+
+<ParamField path="--from_pretrained" type="string" required>
+  Path to pretrained model directory or Hugging Face model identifier
+</ParamField>
+
+<ParamField path="--model_config" type="string" required>
+  Model configuration name (e.g., `125m`, `1.3b`, `llama2`)
+</ParamField>
+
+<ParamField path="--training_data_dirs" type="string[]" required>
+  List of directories containing training data in JSONL format
+</ParamField>
+
+<ParamField path="--dir_data_types" type="string[]" required>
+  Data type labels for each training directory (same order as `training_data_dirs`)
+</ParamField>
+
+<ParamField path="--valid_data_dir" type="string" required>
+  Directory containing validation data
+</ParamField>
+
+<ParamField path="--train_batch_size" type="integer" required>
+  Training batch size per GPU
+</ParamField>
+
+<ParamField path="--eval_steps" type="integer" required>
+  Number of training steps between evaluations
+</ParamField>
+
+<ParamField path="--save_steps" type="integer" required>
+  Number of steps between checkpoint saves
+</ParamField>
+
+<ParamField path="--checkpoints_root_dir" type="string" required>
+  Root directory for saving model checkpoints
+</ParamField>
+
+### Optional Arguments
+
+<ParamField path="--learning_rate" type="float">
+  Learning rate (defaults to config value if not specified)
+</ParamField>
+
+<ParamField path="--warmup_steps" type="integer">
+  Number of warmup steps for learning rate scheduler
+</ParamField>
+
+<ParamField path="--max_steps" type="integer" default="-1">
+  Maximum number of training steps (overrides `num_train_epochs`)
+</ParamField>
+
+<ParamField path="--num_train_epochs" type="integer">
+  Number of training epochs
+</ParamField>
+
+<ParamField path="--scheduler_max_steps" type="integer">
+  Number of steps for LR scheduler (defaults to `max_steps`)
+</ParamField>
+
+<ParamField path="--valid_batch_size" type="integer">
+  Validation batch size (defaults to `train_batch_size`)
+</ParamField>
+
+<ParamField path="--shuffle_buffer_size" type="integer" default="4">
+  Buffer size for dataset shuffling
+</ParamField>
+
+<ParamField path="--experiment_name" type="string" default="none">
+  Name for the experiment (used in tracking)
+</ParamField>
+
+<ParamField path="--dataloader_num_workers" type="integer" default="0">
+  Number of dataloader worker processes
+</ParamField>
+
+<ParamField path="--gradient_accumulation_steps" type="integer" default="1">
+  Number of gradient accumulation steps
+</ParamField>
+
+<ParamField path="--gradient_checkpointing" type="boolean" default="false">
+  Enable gradient checkpointing to save memory
+</ParamField>
+
+<ParamField path="--flash_attn" type="boolean" default="false">
+  Use Flash Attention 2 for faster training
+</ParamField>
+
+### Tracking and Debugging
+
+<ParamField path="--track" type="boolean" default="true">
+  Enable experiment tracking with Aim
+</ParamField>
+
+<ParamField path="--track_dir" type="string">
+  Directory for saving tracking data
+</ParamField>
+
+<ParamField path="--profile" type="boolean" default="false">
+  Enable PyTorch profiler for performance analysis
+</ParamField>
+
+<ParamField path="--profile_dir" type="string">
+  Directory for profiling output
+</ParamField>
+
+<ParamField path="--check_reproducability" type="boolean" default="false">
+  Enable reproducibility checks (for testing only)
+</ParamField>
+
+## Advanced Usage
+
+### Multi-GPU Training
+
+ChemLactica uses Accelerate for distributed training. Launch with:
+
+```bash
+accelerate launch --config_file config/accelerate_config.yaml \
+  chemlactica/train.py \
+  --train_type pretrain \
+  --from_pretrained facebook/galactica-125m \
+  --model_config 125m \
+  # ... other arguments
+```
+
+### Resume from Checkpoint
+
+To resume training from a checkpoint, pass the checkpoint directory path to `--from_pretrained`:
+
+```bash
+python chemlactica/train.py \
+  --train_type pretrain \
+  --from_pretrained ./checkpoints/facebook/galactica-125m/hash123/checkpoint-5000 \
+  --model_config 125m \
+  # ... other arguments
+```
+
+### Multiple Data Sources
+
+You can train on multiple data directories with different types:
+
+```bash
+python chemlactica/train.py \
+  --training_data_dirs /path/to/smiles /path/to/reactions /path/to/properties \
+  --dir_data_types smiles reactions properties \
+  # ... other arguments
+```
+
+### Dynamic Gradient Accumulation
+
+Enable automatic gradient accumulation scheduling:
+
+```yaml
+# In your config YAML
+train_config:
+  grad_accumulation_scheduler: true
+  dynamic_grad_accumulation: true
+  grad_accumulation_max: 256
+  grad_accumulation_delta_steps: 100
+  grad_accumulation_delta_percentage: 0.02
+  grad_accumulation_patience: 4000
+```
+
+## Training Features
+
+### Custom Callbacks
+
+ChemLactica includes several custom callbacks:
+
+- **WPSCounterCallback**: Tracks words per second
+- **CustomProgressCallback**: Enhanced progress reporting with FLOPS tracking
+- **EarlyStoppingCallback**: Stops training at specified steps
+- **JsonlDatasetResumeCallback**: Handles dataset resumption for streaming data
+- **ReproducibilityCallback**: Validates training reproducibility
+- **GradientAccumulationScheduler**: Dynamically adjusts gradient accumulation
+
+### Memory Optimization
+
+<CodeGroup>
+```bash Gradient Checkpointing
+python chemlactica/train.py \
+  --gradient_checkpointing \
+  # ... other arguments
+```
+
+```bash Flash Attention
+python chemlactica/train.py \
+  --flash_attn \
+  # ... other arguments
+```
+
+```bash Combined
+python chemlactica/train.py \
+  --gradient_checkpointing \
+  --flash_attn \
+  --gradient_accumulation_steps 4 \
+  # ... other arguments
+```
+</CodeGroup>
+
+## Checkpoint Management
+
+Checkpoints are saved with the following structure:
+
+```
+checkpoints_root_dir/
+└── organization/
+    └── model_name/
+        └── experiment_hash/
+            ├── checkpoint-1000/
+            ├── checkpoint-2000/
+            └── last/
+```
+
+The `save_total_limit` configuration controls how many checkpoints are kept:
+
+```python
+# From train.py:259
+save_total_limit=train_config.save_total_limit  # Default: 4
+```
+
+## Monitoring Training
+
+### Aim Tracking
+
+When `--track` is enabled, training metrics are logged to Aim:
+
+```bash
+python chemlactica/train.py \
+  --track \
+  --track_dir ./aim_logs \
+  --experiment_name chemistry_pretrain \
+  # ... other arguments
+```
+
+View metrics with:
+
+```bash
+aim up --repo ./aim_logs
+```
+
+### Key Metrics
+
+- Training loss
+- Validation loss  
+- Learning rate
+- Words per second (WPS)
+- Gradient norm
+- FLOPS utilization
+
+## Example Configurations
+
+<CodeGroup>
+```bash Small Model (125M)
+python chemlactica/train.py \
+  --train_type pretrain \
+  --from_pretrained facebook/galactica-125m \
+  --model_config 125m \
+  --training_data_dirs ./data/train \
+  --dir_data_types smiles \
+  --valid_data_dir ./data/valid \
+  --learning_rate 1.4e-3 \
+  --warmup_steps 500 \
+  --train_batch_size 32 \
+  --eval_steps 500 \
+  --save_steps 1000 \
+  --max_steps 50000 \
+  --checkpoints_root_dir ./checkpoints \
+  --experiment_name galactica_125m_pretrain
+```
+
+```bash Large Model (1.3B)
+python chemlactica/train.py \
+  --train_type pretrain \
+  --from_pretrained facebook/galactica-1.3b \
+  --model_config 1.3b \
+  --training_data_dirs ./data/train \
+  --dir_data_types smiles \
+  --valid_data_dir ./data/valid \
+  --learning_rate 1.4e-3 \
+  --warmup_steps 500 \
+  --train_batch_size 4 \
+  --gradient_accumulation_steps 8 \
+  --gradient_checkpointing \
+  --flash_attn \
+  --eval_steps 500 \
+  --save_steps 1000 \
+  --max_steps 100000 \
+  --checkpoints_root_dir ./checkpoints \
+  --experiment_name galactica_1.3b_pretrain
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### Out of Memory
+
+If you encounter OOM errors:
+
+1. Reduce `train_batch_size`
+2. Increase `gradient_accumulation_steps`
+3. Enable `--gradient_checkpointing`
+4. Use `--flash_attn` if available
+5. Reduce `save_total_limit` to save memory
+
+### Slow Training
+
+- Enable `--flash_attn` for 2-3x speedup
+- Increase `dataloader_num_workers`
+- Adjust `shuffle_buffer_size`
+- Use mixed precision training (bf16 is enabled by default)
+
+### Checkpoint Loading Issues
+
+Make sure the checkpoint path includes the full path to the checkpoint directory, not just the parent directory.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Fine-tuning" icon="sliders" href="/training/fine-tuning">
+    Learn how to fine-tune models for specific tasks
+  </Card>
+  <Card title="Configuration" icon="gear" href="/training/configuration">
+    Explore all training configuration options
+  </Card>
+</CardGroup>

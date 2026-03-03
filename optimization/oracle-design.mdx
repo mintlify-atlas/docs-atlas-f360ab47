@@ -1,0 +1,350 @@
+---
+title: Designing Custom Oracles
+description: Learn how to implement oracle functions to evaluate and guide molecular optimization
+---
+
+The oracle is the core component that evaluates generated molecules and guides the optimization process. It defines what makes a molecule "good" for your specific use case.
+
+## Oracle Interface
+
+An oracle must implement the following interface:
+
+```python
+class CustomOracle:
+    def __init__(self, ...):
+        # Maximum number of oracle calls to make
+        self.max_oracle_calls: int = ...
+        
+        # Frequency for logging intermediate results
+        self.freq_log: int = ...
+        
+        # Buffer to track all unique molecules generated
+        self.mol_buffer: Dict = ...
+        
+        # Maximum possible oracle score (upper bound)
+        self.max_possible_oracle_score: float = ...
+        
+        # Optional: if True, __call__ receives MoleculeEntry objects
+        # if False (default), __call__ receives SMILES strings
+        self.takes_entry: bool = False
+
+    def __call__(self, molecules):
+        """
+        Evaluate and return oracle scores for molecules.
+        Log intermediate results if necessary.
+        
+        Args:
+            molecules: List of SMILES strings or MoleculeEntry objects
+                      (depending on self.takes_entry)
+        
+        Returns:
+            List of float scores (same order as input)
+        """
+        ...
+        return oracle_scores
+
+    @property
+    def finish(self):
+        """Specify the stopping condition for optimization."""
+        return len(self.mol_buffer) >= self.max_oracle_calls
+    
+    def __len__(self):
+        """Return the number of molecules evaluated so far."""
+        return len(self.mol_buffer)
+    
+    @property
+    def budget(self):
+        """Return the maximum oracle calls budget."""
+        return self.max_oracle_calls
+```
+
+## Required Attributes
+
+<ParamField path="max_oracle_calls" type="int" required>
+  The maximum number of molecules to evaluate before stopping optimization
+</ParamField>
+
+<ParamField path="freq_log" type="int" required>
+  How often to log intermediate results (e.g., every 100 molecules)
+</ParamField>
+
+<ParamField path="mol_buffer" type="Dict" required>
+  Dictionary to store all evaluated molecules and their scores. Keys are SMILES strings.
+</ParamField>
+
+<ParamField path="max_possible_oracle_score" type="float" required>
+  Upper bound on oracle scores. Used to guide the optimization process.
+</ParamField>
+
+<ParamField path="takes_entry" type="bool" default="False">
+  - If `True`: `__call__` receives a list of `MoleculeEntry` objects
+  - If `False`: `__call__` receives a list of SMILES strings
+  
+  Set to `True` when you need access to RDKit mol objects or fingerprints.
+</ParamField>
+
+## Complete Example: TPSA + Weight Oracle
+
+This example from `mol_opt/example_run.py` optimizes molecules for high TPSA (topological polar surface area) with molecular weight and ring constraints:
+
+```python
+from typing import List
+import numpy as np
+from rdkit.Chem import rdMolDescriptors
+from chemlactica.mol_opt.utils import MoleculeEntry
+
+
+class TPSA_Weight_Oracle:
+    def __init__(self, max_oracle_calls: int):
+        self.max_oracle_calls = max_oracle_calls
+        self.freq_log = 100
+        self.mol_buffer = {}
+        self.max_possible_oracle_score = 800
+        
+        # Request MoleculeEntry objects instead of SMILES strings
+        self.takes_entry = True
+
+    def __call__(self, molecules: List[MoleculeEntry]):
+        """Evaluate molecules based on TPSA, weight, and ring constraints."""
+        oracle_scores = []
+        
+        for molecule in molecules:
+            # Check if already evaluated
+            if self.mol_buffer.get(molecule.smiles):
+                oracle_scores.append(sum(self.mol_buffer[molecule.smiles][0]))
+            else:
+                try:
+                    # Calculate TPSA as the base score
+                    tpsa = rdMolDescriptors.CalcTPSA(molecule.mol)
+                    oracle_score = tpsa
+                    
+                    # Apply weight constraint
+                    weight = rdMolDescriptors.CalcExactMolWt(molecule.mol)
+                    if weight >= 350:
+                        oracle_score = 0
+                    
+                    # Apply ring constraint
+                    num_rings = rdMolDescriptors.CalcNumRings(molecule.mol)
+                    if num_rings < 2:
+                        oracle_score = 0
+                    
+                except Exception as e:
+                    print(e)
+                    oracle_score = 0
+                
+                # Store in buffer
+                self.mol_buffer[molecule.smiles] = [oracle_score, len(self.mol_buffer) + 1]
+                
+                # Log periodically
+                if len(self.mol_buffer) % self.freq_log == 0:
+                    self.log_intermediate()
+                
+                oracle_scores.append(oracle_score)
+        
+        return oracle_scores
+    
+    def log_intermediate(self):
+        """Log statistics of top molecules."""
+        scores = [v[0] for v in self.mol_buffer.values()][-self.max_oracle_calls:]
+        scores_sorted = sorted(scores, reverse=True)[:100]
+        n_calls = len(self.mol_buffer)
+
+        score_avg_top1 = np.max(scores_sorted)
+        score_avg_top10 = np.mean(scores_sorted[:10])
+        score_avg_top100 = np.mean(scores_sorted)
+
+        print(f"{n_calls}/{self.max_oracle_calls} | "
+              f'avg_top1: {score_avg_top1:.3f} | '
+              f'avg_top10: {score_avg_top10:.3f} | '
+              f'avg_top100: {score_avg_top100:.3f}')
+
+    def __len__(self):
+        return len(self.mol_buffer)
+
+    @property
+    def budget(self):
+        return self.max_oracle_calls
+
+    @property
+    def finish(self):
+        return len(self.mol_buffer) >= self.max_oracle_calls
+```
+
+## Using MoleculeEntry Objects
+
+When you set `self.takes_entry = True`, your oracle receives `MoleculeEntry` objects that provide:
+
+<ResponseField name="smiles" type="str">
+  Canonicalized SMILES string
+</ResponseField>
+
+<ResponseField name="mol" type="rdkit.Chem.Mol">
+  RDKit molecule object for property calculations
+</ResponseField>
+
+<ResponseField name="fingerprint" type="rdkit.DataStructs.ExplicitBitVect">
+  Morgan fingerprint (radius=2, nBits=2048)
+</ResponseField>
+
+<ResponseField name="score" type="float">
+  Oracle score (you set this in your `__call__` method)
+</ResponseField>
+
+<ResponseField name="similar_mol_entries" type="List[MoleculeEntry]">
+  Similar molecules used in the prompt for generation
+</ResponseField>
+
+## Oracle Design Patterns
+
+### Pattern 1: Property-Based Oracle
+
+Optimize for molecular properties calculable from RDKit:
+
+```python
+class PropertyOracle:
+    def __call__(self, molecules: List[MoleculeEntry]):
+        scores = []
+        for mol_entry in molecules:
+            # Calculate desired properties
+            qed = rdMolDescriptors.QED(mol_entry.mol)
+            logp = rdMolDescriptors.CalcCrippenDescriptors(mol_entry.mol)[0]
+            
+            # Combine into a single score
+            score = qed * 100 + logp * 10
+            scores.append(score)
+        
+        return scores
+```
+
+### Pattern 2: Docking Score Oracle
+
+Optimize for protein-ligand docking:
+
+```python
+class DockingOracle:
+    def __init__(self, max_oracle_calls: int, protein_file: str):
+        self.max_oracle_calls = max_oracle_calls
+        self.mol_buffer = {}
+        self.max_possible_oracle_score = 0  # Docking scores are negative
+        self.protein_file = protein_file
+        # Initialize docking software (e.g., AutoDock Vina)
+        ...
+    
+    def __call__(self, smiles_list: List[str]):
+        scores = []
+        for smiles in smiles_list:
+            if smiles in self.mol_buffer:
+                scores.append(self.mol_buffer[smiles])
+            else:
+                # Run docking simulation
+                docking_score = self.run_docking(smiles)
+                # Negate to make higher = better
+                oracle_score = -docking_score
+                self.mol_buffer[smiles] = oracle_score
+                scores.append(oracle_score)
+        return scores
+```
+
+### Pattern 3: Multi-Objective Oracle
+
+Optimize for multiple objectives with weighted combination:
+
+```python
+class MultiObjectiveOracle:
+    def __init__(self, max_oracle_calls: int, weights: dict):
+        self.max_oracle_calls = max_oracle_calls
+        self.mol_buffer = {}
+        self.max_possible_oracle_score = 100
+        self.weights = weights
+        self.takes_entry = True
+    
+    def __call__(self, molecules: List[MoleculeEntry]):
+        scores = []
+        for mol_entry in molecules:
+            if mol_entry.smiles in self.mol_buffer:
+                scores.append(self.mol_buffer[mol_entry.smiles])
+            else:
+                # Calculate multiple objectives
+                qed = rdMolDescriptors.QED(mol_entry.mol) * 100
+                sa_score = self.calculate_sa_score(mol_entry.mol)
+                similarity = self.target_similarity(mol_entry.mol)
+                
+                # Weighted combination
+                oracle_score = (
+                    self.weights['qed'] * qed +
+                    self.weights['sa'] * sa_score +
+                    self.weights['similarity'] * similarity
+                )
+                
+                self.mol_buffer[mol_entry.smiles] = oracle_score
+                scores.append(oracle_score)
+        
+        return scores
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Cache results in mol_buffer">
+    Always check `mol_buffer` before computing scores to avoid redundant calculations:
+    
+    ```python
+    if smiles in self.mol_buffer:
+        return self.mol_buffer[smiles]
+    else:
+        score = expensive_calculation(smiles)
+        self.mol_buffer[smiles] = score
+        return score
+    ```
+  </Accordion>
+
+  <Accordion title="Handle invalid molecules gracefully">
+    Wrap scoring in try-except blocks and return 0 for invalid molecules:
+    
+    ```python
+    try:
+        score = calculate_score(molecule)
+    except Exception as e:
+        print(f"Error evaluating {molecule.smiles}: {e}")
+        score = 0
+    ```
+  </Accordion>
+
+  <Accordion title="Set realistic max_possible_oracle_score">
+    The algorithm uses this to guide generation. Set it to:
+    - The theoretical maximum if known
+    - A reasonable upper bound based on your domain knowledge
+    - Slightly above the best score you expect to achieve
+  </Accordion>
+
+  <Accordion title="Log intermediate results">
+    Implement `log_intermediate()` to monitor progress:
+    
+    ```python
+    if len(self.mol_buffer) % self.freq_log == 0:
+        self.log_intermediate()
+    ```
+    
+    Track metrics like top-1, top-10, and top-100 average scores.
+  </Accordion>
+
+  <Accordion title="Use takes_entry for complex calculations">
+    Set `takes_entry = True` when you need:
+    - RDKit mol objects for descriptor calculations
+    - Fingerprints for similarity comparisons
+    - Access to similar molecules used in generation
+    
+    Set `takes_entry = False` (default) for simple SMILES-based oracles.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Run Optimization" icon="play" href="/optimization/optimization-algorithm">
+    Learn how to use your oracle with the optimize() function
+  </Card>
+  <Card title="See Complete Examples" icon="code" href="/optimization/examples">
+    Explore full working examples with different oracle types
+  </Card>
+</CardGroup>

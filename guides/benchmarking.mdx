@@ -1,0 +1,473 @@
+---
+title: "Running Benchmarks"
+description: "Evaluate and compare ChemLactica models on molecular generation and optimization tasks"
+---
+
+## Overview
+
+Benchmarking helps you evaluate model performance on:
+- Molecular optimization tasks
+- Property prediction accuracy
+- Generation diversity and validity
+- Oracle efficiency
+
+This guide covers metrics, evaluation workflows, and result analysis.
+
+## Optimization Metrics
+
+### Top-K Scores
+
+Track the average scores of top-performing molecules:
+
+```python
+from chemlactica.mol_opt.metrics import top_auc
+
+# Calculate Top-100 AUC
+auc_score = top_auc(
+    buffer=oracle.mol_buffer,
+    top_n=100,
+    finish=oracle.finish,
+    freq_log=100,
+    max_oracle_calls=1000
+)
+```
+
+**Metrics tracked:**
+- **Top-1**: Best scoring molecule
+- **Top-10**: Average of 10 best molecules
+- **Top-100**: Average of 100 best molecules
+- **AUC**: Area under the curve for top-N scores over time
+
+### Logging During Optimization
+
+The oracle's `log_intermediate()` method tracks progress:
+
+```python
+def log_intermediate(self):
+    scores = [v[0] for v in self.mol_buffer.values()][-self.max_oracle_calls:]
+    scores_sorted = sorted(scores, reverse=True)[:100]
+    n_calls = len(self.mol_buffer)
+
+    score_avg_top1 = np.max(scores_sorted)
+    score_avg_top10 = np.mean(scores_sorted[:10])
+    score_avg_top100 = np.mean(scores_sorted)
+
+    print(f"{n_calls}/{self.max_oracle_calls} | ",
+          f'avg_top1: {score_avg_top1:.3f} | '
+          f'avg_top10: {score_avg_top10:.3f} | '
+          f'avg_top100: {score_avg_top100:.3f}')
+```
+
+Example output:
+```text
+100/1000 | avg_top1: 156.432 | avg_top10: 142.156 | avg_top100: 128.743
+200/1000 | avg_top1: 178.921 | avg_top10: 165.234 | avg_top100: 151.892
+```
+
+## Diversity Metrics
+
+### Internal Diversity
+
+Measure molecular diversity using Tanimoto similarity:
+
+```python
+from chemlactica.mol_opt.metrics import internal_diversity
+from rdkit.Chem import AllChem
+import numpy as np
+
+# Generate fingerprints
+fingerprints = np.array([
+    AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+    for mol in molecules
+])
+
+# Calculate diversity
+diversity = internal_diversity(
+    molecule_fingerprints=fingerprints,
+    device='cpu',
+    fp_type='morgan',
+    p=1
+)
+
+print(f"Internal diversity: {diversity:.3f}")
+```
+
+<Tip>
+  Higher diversity scores (closer to 1.0) indicate more structurally diverse molecules.
+</Tip>
+
+### Tanimoto Similarity
+
+Compare generated molecules to a reference set:
+
+```python
+from chemlactica.mol_opt.metrics import average_agg_tanimoto
+
+# Compare generated molecules to training set
+similarity = average_agg_tanimoto(
+    stock_vecs=reference_fingerprints,
+    gen_vecs=generated_fingerprints,
+    batch_size=5000,
+    agg='max',  # or 'mean'
+    device='cuda',
+    p=1
+)
+
+print(f"Average max Tanimoto similarity: {similarity:.3f}")
+```
+
+## Running Multiple Trials
+
+Perform multiple optimization runs with different seeds:
+
+```python
+import yaml
+import os
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+from chemlactica.mol_opt.optimization import optimize
+from chemlactica.mol_opt.utils import set_seed
+
+# Load config
+config = yaml.safe_load(open("config.yaml"))
+
+# Load model once
+model = AutoModelForCausalLM.from_pretrained(
+    config["checkpoint_path"],
+    torch_dtype=torch.bfloat16
+).to(config["device"])
+
+tokenizer = AutoTokenizer.from_pretrained(
+    config["tokenizer_path"],
+    padding_side="left"
+)
+
+# Run multiple trials
+seeds = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+results = []
+
+for i, seed in enumerate(seeds):
+    print(f"\n=== Trial {i+1}/{len(seeds)} (seed={seed}) ===")
+    
+    set_seed(seed)
+    oracle = YourOracle(max_oracle_calls=1000)
+    
+    config["log_dir"] = os.path.join(
+        output_dir,
+        f"results_trial_{i}_seed_{seed}.log"
+    )
+    config["max_possible_oracle_score"] = oracle.max_possible_oracle_score
+    
+    optimize(model, tokenizer, oracle, config)
+    
+    # Collect results
+    results.append({
+        'seed': seed,
+        'top1': np.max([v[0] for v in oracle.mol_buffer.values()]),
+        'top10': np.mean(sorted([v[0] for v in oracle.mol_buffer.values()], reverse=True)[:10]),
+        'top100': np.mean(sorted([v[0] for v in oracle.mol_buffer.values()], reverse=True)[:100]),
+        'num_molecules': len(oracle.mol_buffer)
+    })
+
+# Aggregate results
+import pandas as pd
+
+df = pd.DataFrame(results)
+print("\n=== Aggregate Results ===")
+print(df.describe())
+df.to_csv(os.path.join(output_dir, "benchmark_summary.csv"), index=False)
+```
+
+## Benchmark Configuration
+
+### Standard Benchmark Setup
+
+<CodeGroup>
+```yaml benchmark_config.yaml
+# Model
+checkpoint_path: "path/to/model"
+tokenizer_path: "path/to/tokenizer"
+device: "cuda:0"
+
+# Oracle settings
+max_oracle_calls: 1000
+
+# Optimization
+pool_size: 100
+validation_perc: 0.2
+num_gens_per_iter: 50
+generation_batch_size: 32
+num_mols: 3
+num_similars: 5
+sim_range: [0.0, 1.0]
+
+# Generation
+generation_temperature: [0.8, 1.2]
+generation_config:
+  max_new_tokens: 512
+  do_sample: true
+  top_k: 50
+  top_p: 0.95
+  temperature: 0.8
+  num_return_sequences: 1
+
+# Strategy
+strategy: ["rej-sample-v2"]
+eos_token: "</s>"
+
+# Rejection sampling (if using rej-sample-v2)
+rej_sample_config:
+  train_batch_size: 8
+  gradient_accumulation_steps: 4
+  num_train_epochs: 3
+  train_tol_level: 2
+  max_learning_rate: 1.0e-5
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  warmup_steps: 0
+  lr_end: 1.0e-6
+  weight_decay: 0.1
+  global_gradient_norm: 1.0
+  packing: false
+  max_seq_length: 2048
+  dataloader_num_workers: 4
+  checkpoints_dir: "./checkpoints"
+```
+
+```python benchmark_script.py
+import argparse
+import yaml
+import os
+import numpy as np
+import pandas as pd
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+from chemlactica.mol_opt.optimization import optimize
+from chemlactica.mol_opt.utils import set_seed
+from your_oracles import TPSA_Weight_Oracle, QED_Oracle
+
+def run_benchmark(oracle_name, n_runs=5):
+    config = yaml.safe_load(open("benchmark_config.yaml"))
+    
+    model = AutoModelForCausalLM.from_pretrained(
+        config["checkpoint_path"],
+        torch_dtype=torch.bfloat16
+    ).to(config["device"])
+    
+    tokenizer = AutoTokenizer.from_pretrained(
+        config["tokenizer_path"],
+        padding_side="left"
+    )
+    
+    # Select oracle
+    oracle_classes = {
+        'tpsa_weight': TPSA_Weight_Oracle,
+        'qed': QED_Oracle
+    }
+    
+    seeds = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+    results = []
+    
+    for i in range(n_runs):
+        set_seed(seeds[i])
+        oracle = oracle_classes[oracle_name](max_oracle_calls=1000)
+        
+        output_dir = f"results/{oracle_name}/run_{i}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        config["log_dir"] = os.path.join(output_dir, "optimization.log")
+        config["max_possible_oracle_score"] = oracle.max_possible_oracle_score
+        
+        optimize(model, tokenizer, oracle, config)
+        
+        # Collect metrics
+        scores = [v[0] for v in oracle.mol_buffer.values()]
+        sorted_scores = sorted(scores, reverse=True)
+        
+        results.append({
+            'run': i,
+            'seed': seeds[i],
+            'oracle': oracle_name,
+            'top1': sorted_scores[0],
+            'top10': np.mean(sorted_scores[:10]),
+            'top100': np.mean(sorted_scores[:100]),
+            'num_unique': len(oracle.mol_buffer)
+        })
+    
+    # Save results
+    df = pd.DataFrame(results)
+    df.to_csv(f"results/{oracle_name}_summary.csv", index=False)
+    
+    print(f"\n=== {oracle_name} Results ===")
+    print(df[['top1', 'top10', 'top100']].describe())
+    
+    return df
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--oracle", type=str, required=True,
+                       choices=['tpsa_weight', 'qed'])
+    parser.add_argument("--n_runs", type=int, default=5)
+    args = parser.parse_args()
+    
+    run_benchmark(args.oracle, args.n_runs)
+```
+</CodeGroup>
+
+## Analyzing Results
+
+### Result Files
+
+Each optimization run generates a log file:
+
+```text results.log
+generated smiles: CC(C)Oc1ccccc1, score: 45.3210
+generated smiles: c1ccc(CN2CCCC2)cc1, score: 52.1890
+...
+Pool
+	0 smiles: c1ccc(CN2CCCC2)cc1, score: 52.1890
+	1 smiles: CC(C)Oc1ccccc1, score: 45.3210
+...
+Training entries
+	0 smiles: c1ccc(CN2CCCC2)cc1, score: 52.1890
+...
+Validation entries
+	0 smiles: CC(C)Oc1ccccc1, score: 45.3210
+...
+```
+
+### Parsing Results
+
+```python
+import re
+import pandas as pd
+
+def parse_log_file(log_path):
+    molecules = []
+    
+    with open(log_path, 'r') as f:
+        for line in f:
+            if line.startswith('generated smiles:'):
+                match = re.search(r'generated smiles: (.+?), score: ([\d.]+)', line)
+                if match:
+                    smiles, score = match.groups()
+                    molecules.append({
+                        'smiles': smiles,
+                        'score': float(score)
+                    })
+    
+    return pd.DataFrame(molecules)
+
+# Parse and analyze
+df = parse_log_file('results.log')
+print(f"Total molecules: {len(df)}")
+print(f"Unique molecules: {df['smiles'].nunique()}")
+print(f"Top-10 average: {df.nlargest(10, 'score')['score'].mean():.3f}")
+```
+
+### Visualization
+
+```python
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Score distribution
+plt.figure(figsize=(10, 6))
+sns.histplot(data=df, x='score', bins=50)
+plt.title('Distribution of Oracle Scores')
+plt.xlabel('Score')
+plt.ylabel('Count')
+plt.savefig('score_distribution.png')
+
+# Top scores over time
+df_sorted = df.sort_values('score', ascending=False).reset_index(drop=True)
+top_scores = df_sorted.head(100)['score'].values
+
+plt.figure(figsize=(10, 6))
+plt.plot(range(1, 101), top_scores, marker='o')
+plt.title('Top 100 Molecules by Score')
+plt.xlabel('Rank')
+plt.ylabel('Score')
+plt.grid(True, alpha=0.3)
+plt.savefig('top_scores.png')
+```
+
+## Comparing Models
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load results from multiple models
+model_results = {
+    'ChemLactica-125M': pd.read_csv('results/125m_summary.csv'),
+    'ChemLactica-1B': pd.read_csv('results/1b_summary.csv'),
+    'Baseline': pd.read_csv('results/baseline_summary.csv')
+}
+
+# Compare top-10 scores
+comparison = pd.DataFrame({
+    model: data['top10'].describe()[['mean', 'std', 'min', 'max']]
+    for model, data in model_results.items()
+}).T
+
+print("\n=== Top-10 Score Comparison ===")
+print(comparison)
+
+# Box plot comparison
+fig, ax = plt.subplots(figsize=(10, 6))
+data_to_plot = [data['top10'].values for data in model_results.values()]
+ax.boxplot(data_to_plot, labels=model_results.keys())
+ax.set_ylabel('Top-10 Average Score')
+ax.set_title('Model Performance Comparison')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.savefig('model_comparison.png')
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Reproducibility">
+    - Use fixed seeds for reproducible results
+    - Save configuration files with results
+    - Record model checkpoints and versions
+    - Document data preprocessing steps
+  </Accordion>
+
+  <Accordion title="Statistical Significance">
+    - Run at least 5-10 trials per condition
+    - Report mean and standard deviation
+    - Use statistical tests (t-test, Mann-Whitney) for comparisons
+    - Account for random seed variation
+  </Accordion>
+
+  <Accordion title="Resource Management">
+    - Monitor GPU memory usage during long runs
+    - Use checkpointing for multi-day experiments
+    - Clear cache between runs: `torch.cuda.empty_cache()`
+    - Save intermediate results periodically
+  </Accordion>
+
+  <Accordion title="Result Validation">
+    - Verify SMILES validity with RDKit
+    - Check for duplicate molecules
+    - Validate oracle scores manually on samples
+    - Inspect top molecules for chemical sense
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  When comparing models, ensure they use the same oracle implementation, configuration, and random seeds for fair comparison.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Oracles" icon="target" href="/guides/custom-oracle">
+    Create custom scoring functions for your tasks
+  </Card>
+  <Card title="Tokenization" icon="code" href="/guides/tokenization">
+    Understand tokenizer configuration and special tokens
+  </Card>
+</CardGroup>

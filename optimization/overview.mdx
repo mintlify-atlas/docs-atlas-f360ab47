@@ -1,0 +1,177 @@
+---
+title: Molecular Optimization Overview
+description: Learn how ChemLactica's genetic-like optimization algorithm achieves state-of-the-art results on molecular optimization benchmarks
+---
+
+ChemLactica's molecular optimization framework combines large language models with a genetic-like optimization algorithm to achieve state-of-the-art results on challenging molecular design benchmarks.
+
+## How It Works
+
+The optimization process uses the model's ability to generate molecules conditioned on:
+- **Similar molecules** with specified Tanimoto similarity scores
+- **Desired properties** like SAS, QED, molecular weight, etc.
+- **Oracle scores** indicating the quality of generated molecules
+
+The algorithm iteratively:
+1. Generates new molecules from prompts based on high-scoring molecules in the pool
+2. Evaluates them using a custom oracle function
+3. Maintains a pool of top-performing molecules
+4. Fine-tunes the model on successful molecules (optional)
+
+## Benchmark Results
+
+ChemLactica achieves state-of-the-art performance across multiple optimization tasks:
+
+### Practical Molecular Optimization (PMO)
+
+<CardGroup cols={2}>
+  <Card title="ChemLactica" icon="trophy">
+    **17.5** average score
+  </Card>
+  <Card title="Previous SOTA" icon="chart-line">
+    16.2 (Genetic-guided GFlowNets)
+  </Card>
+</CardGroup>
+
+The [Practical Molecular Optimization benchmark](https://arxiv.org/abs/2206.12411) tests optimization across multiple drug-like property objectives.
+
+### Docking Optimization
+
+<Card title="AutoDock Vina Optimization" icon="flask">
+  **3-4x fewer oracle calls** to generate 100 good molecules compared to Beam Enumeration (previous SOTA)
+</Card>
+
+Optimizing molecular docking scores is crucial for drug discovery. ChemLactica significantly reduces the computational cost while maintaining quality.
+
+### QED Optimization
+
+From the [RetMol paper](https://arxiv.org/abs/2208.11126) benchmark:
+
+<CardGroup cols={2}>
+  <Card title="ChemLactica-125M" icon="check">
+    **99%** success rate with **10K** oracle calls
+  </Card>
+  <Card title="RetMol (Original)" icon="clock">
+    96% success rate with **50K** oracle calls
+  </Card>
+</CardGroup>
+
+ChemLactica-125M achieves better results with **5x fewer oracle calls**.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Custom Oracles" icon="code">
+    Define any objective function to optimize molecules for your specific use case
+  </Card>
+  <Card title="Flexible Prompting" icon="sliders">
+    Control molecular properties through structured prompts with similarity constraints
+  </Card>
+  <Card title="Adaptive Fine-tuning" icon="graduation-cap">
+    Optional rejection sampling strategy that fine-tunes the model during optimization
+  </Card>
+  <Card title="Efficient Search" icon="gauge-high">
+    Genetic-like algorithm with diversity filtering to explore chemical space effectively
+  </Card>
+</CardGroup>
+
+## Optimization Strategies
+
+ChemLactica supports two optimization strategies:
+
+### Default Strategy
+
+Uses the pre-trained model without additional fine-tuning:
+
+```yaml
+strategy: [default]
+```
+
+**Pros:**
+- Faster iteration times
+- No need for training infrastructure
+- Works well for objectives similar to pre-training data
+
+**Cons:**
+- May not adapt to highly specialized objectives
+
+### Rejection Sampling (rej-sample-v2)
+
+Fine-tunes the model during optimization on high-scoring molecules:
+
+```yaml
+strategy: [rej-sample-v2]
+
+rej_sample_config:
+  train_tol_level: 3
+  num_train_epochs: 5
+  # ... additional config
+```
+
+**Pros:**
+- Adapts to specific optimization objectives
+- Achieves better results on challenging tasks
+- Model learns to generate molecules matching the oracle
+
+**Cons:**
+- Requires GPU memory for training
+- Slower iteration times
+- Needs careful hyperparameter tuning
+
+<Note>
+The **rej-sample-v2** strategy is recommended for achieving state-of-the-art results on challenging benchmarks. Use **default** strategy for faster exploration or when GPU memory is limited.
+</Note>
+
+## Quick Start
+
+Here's a minimal example to get started:
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from chemlactica.mol_opt.optimization import optimize
+import yaml
+
+# Load model and tokenizer
+model = AutoModelForCausalLM.from_pretrained("yerevann/chemlactica-125m")
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemlactica-125m")
+
+# Load configuration
+config = yaml.safe_load(open("config.yaml"))
+
+# Create your oracle (see Oracle Design page)
+oracle = YourCustomOracle(max_oracle_calls=1000)
+config["max_possible_oracle_score"] = oracle.max_possible_oracle_score
+
+# Run optimization
+optimize(model, tokenizer, oracle, config)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Design Custom Oracles" icon="flask" href="/optimization/oracle-design">
+    Learn how to implement custom oracle functions for your objectives
+  </Card>
+  <Card title="Algorithm Details" icon="gears" href="/optimization/optimization-algorithm">
+    Understand the optimization algorithm workflow
+  </Card>
+  <Card title="Configure Hyperparameters" icon="sliders" href="/optimization/hyperparameters">
+    Tune the optimization process for your use case
+  </Card>
+  <Card title="See Examples" icon="book" href="/optimization/examples">
+    Explore complete working examples
+  </Card>
+</CardGroup>
+
+## Citation
+
+If you use ChemLactica for molecular optimization, please cite:
+
+```bibtex
+@article{chemlactica2024,
+  title={Small Molecule Optimization with Large Language Models},
+  author={YerevaNN Research},
+  year={2024},
+  url={https://yerevann.com/papers/small-molecule-optimization-with-large-language-models.pdf}
+}
+```

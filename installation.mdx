@@ -1,0 +1,162 @@
+---
+title: Installation
+description: Set up ChemLactica with conda and install all required dependencies
+---
+
+# Installation
+
+ChemLactica requires Python 3.11 and conda for managing dependencies. Follow these steps to set up your environment.
+
+## Prerequisites
+
+Before installing ChemLactica, ensure you have:
+
+- **Python 3.11**
+- **conda** (Anaconda or Miniconda)
+- **CUDA 11.8** (for GPU acceleration)
+
+<Note>
+While ChemLactica can run on CPU, GPU acceleration is strongly recommended for molecular optimization tasks.
+</Note>
+
+## Quick installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the ChemLactica repository from GitHub:
+    
+    ```bash
+    git clone https://github.com/YerevaNN/ChemLactica.git
+    cd ChemLactica
+    ```
+  </Step>
+
+  <Step title="Create conda environment">
+    Create a new conda environment with Python 3.11 using the provided environment file:
+    
+    ```bash
+    conda create -n chemlactica python=3.11 -y -f environment.yml
+    ```
+    
+    This will install all required dependencies including:
+    - PyTorch 2.1.2 with CUDA 11.8 support
+    - Transformers 4.39.0
+    - RDKit 2023.9.5 for molecular manipulation
+    - Flash Attention 2.5.6 for efficient inference
+    - TRL 0.8.6 for fine-tuning
+    - And many other dependencies
+  </Step>
+
+  <Step title="Activate the environment">
+    Activate the newly created conda environment:
+    
+    ```bash
+    conda activate chemlactica
+    ```
+  </Step>
+</Steps>
+
+## Key dependencies
+
+The installation includes these important packages:
+
+### Core ML frameworks
+
+- **PyTorch 2.1.2**: Deep learning framework with CUDA 11.8 support
+- **Transformers 4.39.0**: Hugging Face library for loading pre-trained models
+- **Accelerate 0.28.0**: Distributed training and inference
+- **TRL 0.8.6**: Transformer Reinforcement Learning for fine-tuning
+
+### Chemistry libraries
+
+- **RDKit 2023.9.5**: Comprehensive cheminformatics toolkit
+- **ChemLactica 0.0.1**: Core ChemLactica package (installed via pip)
+
+### Performance optimization
+
+- **Flash Attention 2.5.6**: Efficient attention mechanism implementation
+- **BitsAndBytes 0.43.0**: 8-bit optimizer for memory-efficient training
+- **Einops 0.7.0**: Tensor operations library
+
+### Data and utilities
+
+- **Datasets 2.18.0**: Hugging Face datasets library
+- **Pandas 2.2.1**: Data manipulation
+- **NumPy 1.26.4**: Numerical computing
+- **Scikit-learn 1.4.1**: Machine learning utilities
+
+## Verify installation
+
+After installation, verify that everything is set up correctly:
+
+```bash
+python -c "import torch; print(f'PyTorch: {torch.__version__}')"
+python -c "import transformers; print(f'Transformers: {transformers.__version__}')"
+python -c "import rdkit; print(f'RDKit: {rdkit.__version__}')"
+python -c "import chemlactica; print('ChemLactica installed successfully')"
+```
+
+### Check CUDA availability
+
+To verify GPU support:
+
+```bash
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}')"
+```
+
+<Warning>
+If CUDA is not available, the models will run on CPU, which will be significantly slower for molecular optimization tasks.
+</Warning>
+
+## Download pre-trained models
+
+ChemLactica models are hosted on Hugging Face and will be automatically downloaded when you first use them. You can also download them manually:
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Download Chemlactica-125M
+model = AutoModelForCausalLM.from_pretrained("yerevann/chemlactica-125m")
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemlactica-125m")
+
+# Download Chemlactica-1.3B
+model = AutoModelForCausalLM.from_pretrained("yerevann/chemlactica-1.3b")
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemlactica-1.3b")
+
+# Download Chemma-2B
+model = AutoModelForCausalLM.from_pretrained("yerevann/chemma-2b")
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemma-2b")
+```
+
+## Troubleshooting
+
+### CUDA version mismatch
+
+If you encounter CUDA version issues, ensure your NVIDIA drivers are compatible with CUDA 11.8:
+
+```bash
+nvidia-smi
+```
+
+### Memory issues
+
+For the larger models (1.3B and 2B parameters), ensure you have sufficient GPU memory:
+
+- **Chemlactica-125M**: ~1GB GPU memory
+- **Chemlactica-1.3B**: ~5GB GPU memory  
+- **Chemma-2B**: ~8GB GPU memory
+
+Consider using lower precision (bfloat16 or float16) to reduce memory usage:
+
+```python
+import torch
+
+model = AutoModelForCausalLM.from_pretrained(
+    "yerevann/chemlactica-125m",
+    torch_dtype=torch.bfloat16
+)
+```
+
+## Next steps
+
+Now that you have ChemLactica installed, proceed to the [Quick start guide](/quickstart) to generate your first molecules!

@@ -1,0 +1,195 @@
+---
+title: Model Architectures
+description: Overview of ChemLactica and Chemma model architectures and pre-trained models
+---
+
+## Overview
+
+ChemLactica provides a family of large language models specifically designed to understand and generate small organic molecules. These models are trained to comprehend SMILES representations, molecular properties, and relationships between molecules.
+
+## Model Family
+
+### Chemlactica Models
+
+The Chemlactica models are built on top of Meta's [Galactica architecture](https://huggingface.co/facebook/galactica-1.3b), a decoder-only transformer model optimized for scientific knowledge.
+
+<CardGroup cols={2}>
+  <Card title="Chemlactica-125M" icon="atom" href="https://huggingface.co/yerevann/chemlactica-125m">
+    Lightweight model with 125 million parameters, ideal for fast inference and fine-tuning
+  </Card>
+  <Card title="Chemlactica-1.3B" icon="atom" href="https://huggingface.co/yerevann/chemlactica-1.3b">
+    Larger model with 1.3 billion parameters for enhanced performance on complex tasks
+  </Card>
+</CardGroup>
+
+#### Architecture Details (Chemlactica-125M)
+
+```yaml chemlactica/config/config_yamls/galactica_125m_pretrain_config.yaml
+model_config:
+  n_heads: 12
+  n_layers: 12
+  block_size: 2048
+  vocab_size: 50000
+  separator_token: </s>
+  separator_token_id: 2
+  tokenizer_path: "./chemlactica/tokenizer/ChemLacticaTokenizer66"
+```
+
+<Note>
+  The 125M model uses 12 transformer layers with 12 attention heads each, supporting a maximum context length of 2048 tokens.
+</Note>
+
+### Chemma Models
+
+Chemma-2B is built on top of Google's [Gemma-2B](https://huggingface.co/google/gemma-2b) architecture, offering state-of-the-art performance for molecular tasks.
+
+<Card title="Chemma-2B" icon="atom" href="https://huggingface.co/yerevann/chemma-2b">
+  Advanced 2 billion parameter model based on Gemma architecture
+</Card>
+
+#### Architecture Details (Chemma-2B)
+
+```yaml chemlactica/config/config_yamls/gemma_2b_pretrain_config.yaml
+model_config:
+  n_heads: 12
+  n_layers: 18
+  block_size: 2048
+  vocab_size: 256000
+  separator_token: <bos>
+  separator_token_id: 2
+```
+
+<Note>
+  Chemma-2B uses 18 transformer layers and a significantly larger vocabulary (256K tokens) compared to Chemlactica models.
+</Note>
+
+## Model Capabilities
+
+All models in the ChemLactica family understand:
+
+<AccordionGroup>
+  <Accordion title="Molecular Structure" icon="molecule">
+    - SMILES notation for small organic molecules
+    - Canonical and non-canonical SMILES representations
+    - Molecular graphs and connectivity
+  </Accordion>
+
+  <Accordion title="Molecular Properties" icon="flask">
+    - **QED**: Quantitative Estimate of Drug-likeness
+    - **SAS**: Synthetic Accessibility Score
+    - **TPSA**: Topological Polar Surface Area
+    - **CLogP**: Partition coefficient (lipophilicity)
+    - **Molecular Weight**: Exact molecular weight
+    - And many more properties (see [Molecular Properties](/concepts/molecular-properties))
+  </Accordion>
+
+  <Accordion title="Molecular Similarity" icon="shuffle">
+    - Tanimoto similarity over ECFC4 (Morgan) fingerprints
+    - Structure-based similarity comparisons
+    - Finding related molecules in chemical space
+  </Accordion>
+</AccordionGroup>
+
+## Loading Pre-trained Models
+
+### Using Hugging Face Transformers
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Load Chemlactica-125M
+model = AutoModelForCausalLM.from_pretrained(
+    "yerevann/chemlactica-125m",
+    torch_dtype=torch.bfloat16
+)
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemlactica-125m")
+
+# Load Chemma-2B
+model = AutoModelForCausalLM.from_pretrained(
+    "yerevann/chemma-2b",
+    torch_dtype=torch.bfloat16
+)
+tokenizer = AutoTokenizer.from_pretrained("yerevann/chemma-2b")
+```
+
+### Configuration for Optimization
+
+When using models for molecular optimization:
+
+```yaml chemlactica/mol_opt/chemlactica_125m_hparams.yaml
+checkpoint_path: yerevann/chemlactica-125m
+tokenizer_path: yerevann/chemlactica-125m
+pool_size: 10
+validation_perc: 0.2
+num_similars: 5
+num_gens_per_iter: 200
+device: cuda:0
+sim_range: [0.4, 0.9]
+generation_batch_size: 200
+
+generation_config:
+  repetition_penalty: 1.0
+  max_new_tokens: 100
+  do_sample: true
+  eos_token_id: 20
+```
+
+## Model Performance
+
+### Property Prediction
+
+The models can be fine-tuned for property prediction tasks with impressive results:
+
+- **FreeSolv**: ~0.3 RMSE (state-of-the-art on MoleculeNet benchmark)
+- Fine-tuning requires minimal data and training time
+
+### Molecular Optimization
+
+When wrapped in a genetic-like optimization algorithm, the models achieve:
+
+<CardGroup cols={2}>
+  <Card title="Practical Molecular Optimization" icon="chart-line">
+    **Score: 17.5** vs 16.2 (previous SOTA)
+    
+    Outperforms Genetic-guided GFlowNets
+  </Card>
+  <Card title="QED Optimization" icon="bullseye">
+    **99% success rate** with 10K oracle calls
+    
+    vs 96% with 50K calls (RetMol paper)
+  </Card>
+</CardGroup>
+
+### Docking Optimization
+
+For AutoDock Vina docking optimization:
+- **3-4x fewer oracle calls** needed to generate 100 good molecules
+- Compared to previous SOTA (Beam Enumeration)
+
+## Model Selection Guide
+
+<Tip>
+  Choose your model based on your use case:
+  
+  - **Chemlactica-125M**: Fast inference, fine-tuning experiments, resource-constrained environments
+  - **Chemlactica-1.3B**: Better performance on complex tasks, balanced speed/accuracy
+  - **Chemma-2B**: Maximum performance, state-of-the-art results, GPU-rich environments
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="SMILES Format" icon="code" href="/concepts/smiles-format">
+    Learn about molecular representation
+  </Card>
+  <Card title="Molecular Properties" icon="flask" href="/concepts/molecular-properties">
+    Explore calculated properties
+  </Card>
+  <Card title="Training Data" icon="database" href="/concepts/training-data">
+    Understand the training corpus
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Start using the models
+  </Card>
+</CardGroup>

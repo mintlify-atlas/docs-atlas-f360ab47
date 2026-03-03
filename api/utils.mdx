@@ -1,0 +1,433 @@
+---
+title: 'Utility Classes'
+description: 'Core data structures for molecular optimization'
+---
+
+## MoleculeEntry
+
+Represents a single molecule with its properties, score, and fingerprint.
+
+### Constructor
+
+```python
+class MoleculeEntry:
+    def __init__(self, smiles, score=0, **kwargs)
+```
+
+#### Parameters
+
+<ParamField path="smiles" type="str" required>
+  SMILES string representing the molecular structure. Will be canonicalized automatically using RDKit.
+</ParamField>
+
+<ParamField path="score" type="float" default="0">
+  Oracle score for the molecule. Typically set after evaluation.
+</ParamField>
+
+<ParamField path="**kwargs" type="dict" default="{}">
+  Additional properties to store with the molecule. Accessible via `add_props` attribute.
+</ParamField>
+
+### Attributes
+
+<ResponseField name="smiles" type="str">
+  Canonicalized SMILES string.
+</ResponseField>
+
+<ResponseField name="score" type="float">
+  Oracle score for the molecule.
+</ResponseField>
+
+<ResponseField name="mol" type="rdkit.Chem.Mol">
+  RDKit molecule object (only if SMILES is non-empty).
+</ResponseField>
+
+<ResponseField name="fingerprint" type="rdkit.DataStructs.ExplicitBitVect">
+  Morgan fingerprint (radius=2, 2048 bits) for similarity calculations.
+</ResponseField>
+
+<ResponseField name="similar_mol_entries" type="List[MoleculeEntry]">
+  List of similar molecules used in prompt construction.
+</ResponseField>
+
+<ResponseField name="add_props" type="dict">
+  Additional properties passed via kwargs.
+</ResponseField>
+
+### Methods
+
+#### `__eq__(other)`
+
+Compares molecules based on canonical SMILES.
+
+```python
+mol1 = MoleculeEntry("CCO")
+mol2 = MoleculeEntry("OCC")  # Same molecule, different SMILES
+print(mol1 == mol2)  # True (after canonicalization)
+```
+
+#### `__lt__(other)`
+
+Compares molecules by score (or SMILES if scores are equal). Used for sorting.
+
+```python
+mol1 = MoleculeEntry("CCO", score=0.8)
+mol2 = MoleculeEntry("CC", score=0.9)
+print(mol1 < mol2)  # True
+```
+
+#### `__hash__()`
+
+Returns hash of the SMILES string. Allows use in sets and as dictionary keys.
+
+```python
+mol_set = {MoleculeEntry("CCO"), MoleculeEntry("CC")}
+```
+
+#### `__str__()` / `__repr__()`
+
+Returns human-readable representation.
+
+```python
+mol = MoleculeEntry("CCO", score=0.85)
+print(mol)  # "smiles: CCO, score: 0.85"
+```
+
+### Example Usage
+
+```python
+from chemlactica.mol_opt.utils import MoleculeEntry
+
+# Create a molecule
+mol = MoleculeEntry(
+    smiles="CC(=O)Oc1ccccc1C(=O)O",  # Aspirin
+    score=0.92
+)
+
+print(mol.smiles)       # Canonical SMILES
+print(mol.score)        # 0.92
+print(mol.fingerprint)  # Morgan fingerprint
+
+# Add similar molecules
+similar = MoleculeEntry("CC(=O)OC1=CC=CC=C1")
+mol.similar_mol_entries = [similar]
+
+# Additional properties
+mol_with_props = MoleculeEntry(
+    smiles="CCO",
+    logP=0.5,
+    mw=46.07
+)
+print(mol_with_props.add_props)  # {'logP': 0.5, 'mw': 46.07}
+```
+
+---
+
+## OptimEntry
+
+Represents an optimization entry containing multiple molecules with a target molecule to generate.
+
+### Constructor
+
+```python
+class OptimEntry:
+    def __init__(self, last_entry, mol_entries)
+```
+
+#### Parameters
+
+<ParamField path="last_entry" type="MoleculeEntry" required>
+  The target molecule to generate. Can be `None` initially and set later.
+</ParamField>
+
+<ParamField path="mol_entries" type="List[MoleculeEntry]" required>
+  Context molecules used to construct the optimization prompt.
+</ParamField>
+
+### Attributes
+
+<ResponseField name="last_entry" type="MoleculeEntry">
+  Target molecule to generate or that was generated.
+</ResponseField>
+
+<ResponseField name="mol_entries" type="List[MoleculeEntry]">
+  Context molecules for the prompt.
+</ResponseField>
+
+<ResponseField name="entry_status" type="EntryStatus">
+  Status indicating if this entry is for training, validation, or unassigned:
+  - `EntryStatus.none` (0): Not yet assigned
+  - `EntryStatus.train` (1): Training set
+  - `EntryStatus.valid` (2): Validation set
+</ResponseField>
+
+### Methods
+
+#### `to_prompt(is_generation, include_oracle_score, config, max_score)`
+
+Generates a formatted prompt for model training or generation.
+
+**Parameters:**
+
+<ParamField path="is_generation" type="bool" required>
+  If `True`, creates a prompt for generation (ends with `[START_SMILES]`). If `False`, creates a training prompt with complete SMILES.
+</ParamField>
+
+<ParamField path="include_oracle_score" type="bool" required>
+  Whether to include oracle scores in the prompt (required for rejection sampling).
+</ParamField>
+
+<ParamField path="config" type="dict" required>
+  Configuration dictionary with `strategy`, `eos_token`, and `sim_range` keys.
+</ParamField>
+
+<ParamField path="max_score" type="float" required>
+  Maximum score achieved so far, used to sample desired scores during generation.
+</ParamField>
+
+**Returns:** `str` - Formatted prompt string
+
+**Example:**
+
+```python
+entry = OptimEntry(
+    last_entry=MoleculeEntry("CCO", score=0.8),
+    mol_entries=[MoleculeEntry("CC", score=0.7)]
+)
+
+config = {
+    "strategy": ["rej-sample-v2"],
+    "eos_token": "</s>",
+    "sim_range": [0.3, 0.7]
+}
+
+# Generation prompt
+gen_prompt = entry.to_prompt(
+    is_generation=True,
+    include_oracle_score=True,
+    config=config,
+    max_score=0.85
+)
+
+# Training prompt
+train_prompt = entry.to_prompt(
+    is_generation=False,
+    include_oracle_score=True,
+    config=config,
+    max_score=0.85
+)
+```
+
+#### `contains_entry(mol_entry)`
+
+Checks if a molecule already exists in the entry (including context and similar molecules).
+
+**Parameters:**
+- `mol_entry` (MoleculeEntry): Molecule to check
+
+**Returns:** `bool` - `True` if molecule is already present
+
+```python
+entry = OptimEntry(None, [MoleculeEntry("CCO")])
+new_mol = MoleculeEntry("CCO")
+print(entry.contains_entry(new_mol))  # True
+```
+
+---
+
+## Pool
+
+Manages a pool of high-scoring optimization entries with diversity filtering and train/validation splitting.
+
+### Constructor
+
+```python
+class Pool:
+    def __init__(self, size, validation_perc)
+```
+
+#### Parameters
+
+<ParamField path="size" type="int" required>
+  Maximum number of entries to maintain in the pool.
+</ParamField>
+
+<ParamField path="validation_perc" type="float" required>
+  Percentage of pool entries reserved for validation (0.0 to 1.0).
+</ParamField>
+
+### Attributes
+
+<ResponseField name="size" type="int">
+  Maximum pool capacity.
+</ResponseField>
+
+<ResponseField name="optim_entries" type="List[OptimEntry]">
+  Current optimization entries in the pool, sorted by score (descending).
+</ResponseField>
+
+<ResponseField name="num_validation_entries" type="int">
+  Number of entries reserved for validation: `int(size * validation_perc + 1)`.
+</ResponseField>
+
+### Methods
+
+#### `add(entries, diversity_score=1.0)`
+
+Adds new entries to the pool with diversity filtering.
+
+**Parameters:**
+
+<ParamField path="entries" type="List[OptimEntry]" required>
+  New optimization entries to add to the pool.
+</ParamField>
+
+<ParamField path="diversity_score" type="float" default="1.0">
+  Maximum Tanimoto similarity threshold. Molecules more similar than this are considered duplicates and filtered out.
+</ParamField>
+
+**Behavior:**
+1. Merges new entries with existing pool
+2. Sorts by score (descending)
+3. Removes duplicates and overly similar molecules
+4. Keeps top `size` entries
+5. Assigns train/validation status to maintain `validation_perc` ratio
+
+```python
+pool = Pool(size=100, validation_perc=0.1)
+
+# Add entries
+entries = [
+    OptimEntry(MoleculeEntry("CCO", score=0.9), []),
+    OptimEntry(MoleculeEntry("CC", score=0.8), [])
+]
+pool.add(entries)
+
+print(len(pool))  # 2
+```
+
+#### `get_train_valid_entries()`
+
+Returns separate lists of training and validation entries.
+
+**Returns:** `Tuple[List[OptimEntry], List[OptimEntry]]` - (train_entries, valid_entries)
+
+```python
+train, valid = pool.get_train_valid_entries()
+print(f"Training: {len(train)}, Validation: {len(valid)}")
+```
+
+#### `random_subset(subset_size)`
+
+Samples random entries from the pool without replacement.
+
+**Parameters:**
+- `subset_size` (int): Number of entries to sample
+
+**Returns:** `List[OptimEntry]` - Random sample (up to pool size)
+
+```python
+pool = Pool(size=100, validation_perc=0.1)
+# ... add entries ...
+
+# Sample 10 random entries for prompting
+subset = pool.random_subset(10)
+```
+
+#### `__len__()`
+
+Returns current number of entries in the pool.
+
+```python
+pool = Pool(size=100, validation_perc=0.1)
+print(len(pool))  # 0
+```
+
+### Example Usage
+
+```python
+from chemlactica.mol_opt.utils import Pool, OptimEntry, MoleculeEntry
+
+# Create pool
+pool = Pool(size=50, validation_perc=0.2)  # 20% validation
+
+# Generate and add molecules
+for i in range(100):
+    mol = MoleculeEntry(f"C" * (i + 1), score=i / 100)
+    entry = OptimEntry(mol, [])
+    pool.add([entry])
+
+print(f"Pool size: {len(pool)}")  # 50 (max size)
+
+# Get train/valid split
+train, valid = pool.get_train_valid_entries()
+print(f"Train: {len(train)}, Valid: {len(valid)}")  # ~40, ~10
+
+# Sample for generation
+subset = pool.random_subset(5)
+for entry in subset:
+    print(entry.last_entry)
+```
+
+---
+
+## Helper Functions
+
+### `canonicalize(smiles)`
+
+Converts a SMILES string to its canonical form using RDKit.
+
+```python
+from chemlactica.mol_opt.utils import canonicalize
+
+smiles = "OCC"
+canonical = canonicalize(smiles)
+print(canonical)  # "CCO"
+```
+
+### `get_morgan_fingerprint(mol)`
+
+Generates a Morgan fingerprint for a molecule.
+
+**Parameters:**
+- `mol` (rdkit.Chem.Mol): RDKit molecule object
+
+**Returns:** `rdkit.DataStructs.ExplicitBitVect` - Morgan fingerprint (radius=2, 2048 bits)
+
+```python
+from chemlactica.mol_opt.utils import get_morgan_fingerprint
+from rdkit import Chem
+
+mol = Chem.MolFromSmiles("CCO")
+fp = get_morgan_fingerprint(mol)
+```
+
+### `tanimoto_dist_func(fing1, fing2, fingerprint="morgan")`
+
+Calculates Tanimoto similarity between two fingerprints.
+
+**Parameters:**
+- `fing1`: First fingerprint
+- `fing2`: Second fingerprint
+- `fingerprint` (str): Fingerprint type (currently only "morgan" is used)
+
+**Returns:** `float` - Tanimoto similarity (0.0 to 1.0)
+
+```python
+from chemlactica.mol_opt.utils import tanimoto_dist_func
+
+mol1 = MoleculeEntry("CCO")
+mol2 = MoleculeEntry("CCCO")
+similarity = tanimoto_dist_func(mol1.fingerprint, mol2.fingerprint)
+print(f"Similarity: {similarity:.3f}")
+```
+
+### `set_seed(seed_value)`
+
+Sets random seeds for reproducibility across random, numpy, and PyTorch.
+
+```python
+from chemlactica.mol_opt.utils import set_seed
+
+set_seed(42)
+```

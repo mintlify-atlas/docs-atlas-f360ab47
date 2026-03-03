@@ -1,0 +1,388 @@
+---
+title: Training Data
+description: Overview of the PubChem training corpus and data format used for ChemLactica models
+---
+
+## Training Corpus
+
+All ChemLactica and Chemma models are trained on a comprehensive corpus derived from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), the world's largest collection of freely accessible chemical information.
+
+<CardGroup cols={2}>
+  <Card title="Corpus Size" icon="database">
+    **40 billion tokens**
+    
+    Covering 100M+ molecules
+  </Card>
+  <Card title="Dataset on HuggingFace" icon="huggingface" href="https://huggingface.co/datasets/yerevann/PubChemForLM">
+    **yerevann/PubChemForLM**
+    
+    Publicly available dataset
+  </Card>
+</CardGroup>
+
+## Data Format
+
+### JSONL Structure
+
+The training data is stored in JSONL (JSON Lines) format, with each line representing one molecular entry:
+
+```python chemlactica/get_dataset.py
+training_data_files = glob.glob(training_data_dir + "/*.jsonl")
+
+dataset = IterableDataset.from_generator(
+    samples_generator,
+    gen_kwargs={
+        "files": training_data_files,
+        "shared_jsonl_files": shared_jsonl_files,
+    },
+)
+```
+
+### Example Entry
+
+Each molecule in the corpus contains multiple fields:
+
+```json
+{
+  "CID": 523129,
+  "SMILES": "CCCCCCOC(=O)NC1=CC=C(C=C1)N=NC2=CC=CC=C2",
+  "synonyms": [{"name": "p-Phenylazo carbanilic acid, n-hexyl ester"}],
+  "related": [
+    {"SMILES": "CCCCOC(=O)NC1=CC=C(C=C1)N", "similarity": 0.7}
+  ],
+  "SAS": 2.0,
+  "WEIGHT": 325.1,
+  "TPSA": 63.06823,
+  "CLOGP": 6.231230123,
+  "QED": 0.46,
+  "NUMHDONORS": 1,
+  "NUMHACCEPTORS": 4,
+  "NUMHETEROATOMS": 5,
+  "NUMROTATABLEBONDS": 8,
+  "NOCOUNT": 5,
+  "NHOHCOUNT": 1,
+  "RINGCOUNT": 2,
+  "HEAVYATOMCOUNT": 24,
+  "FRACTIONCSP3": 0.32,
+  "NUMAROMATICRINGS": 2,
+  "NUMSATURATEDRINGS": 0,
+  "IUPAC": "hexyl N-(4-phenyldiazenylphenyl)carbamate",
+  "experimental": [
+    {
+      "PROPERTY_NAME": "Kovats Retention Index",
+      "PROPERTY_VALUE": "Semi-standard non-polar: 4303"
+    }
+  ]
+}
+```
+
+## Data Processing
+
+### Text Formatting
+
+Raw JSON data is converted to formatted text strings for training:
+
+```python chemlactica/utils/text_format_utils.py
+def generate_formatted_string(compound_json, rng, model_config):
+    key_value_pairs = []
+    
+    # SMILES may appear first (50% chance)
+    key = "SMILES"
+    value = compound_json.get(key, "")
+    if rng.integers(2) == 0:
+        if value:
+            key_value_pairs.append(format_key_value(key, value, rng))
+            del compound_json[key]
+    
+    # Shuffle remaining keys for variety
+    keys = list(compound_json.keys())
+    rng.shuffle(keys)
+    
+    for key in keys:
+        key_value_pairs.append(format_key_value(key, compound_json[key], rng))
+    
+    compound_formatted_string = "".join(key_value_pairs) + model_config.separator_token
+    return compound_formatted_string
+```
+
+<Note>
+  The order of properties is randomized during training to prevent the model from learning order-dependent patterns.
+</Note>
+
+### Property Formatting
+
+Different types of data are formatted with special tags:
+
+```python chemlactica/utils/text_format_utils.py
+def format_key_value(key, value, rng):
+    if key == "related":
+        # Similar molecules with Tanimoto scores
+        if len(value) > 10:
+            value = rng.choice(value, size=10, replace=False, shuffle=False)
+        for pair in value:
+            rounded_sim = "{:.2f}".format(float(pair["similarity"]))
+            formatted_string += f"[SIMILAR]{pair['SMILES']} {rounded_sim}[/SIMILAR]"
+            
+    elif key == "experimental":
+        # Experimental properties
+        for pair in value:
+            formatted_string += f"[PROPERTY]{pair['PROPERTY_NAME']} {pair['PROPERTY_VALUE']}[/PROPERTY]"
+            
+    elif key == "synonyms":
+        # Chemical names
+        for val in value:
+            formatted_string += f"[SYNONYM]{val['name']}[/SYNONYM]"
+    else:
+        # Standard properties (QED, SAS, etc.)
+        if SPECIAL_TAGS[key].get("type") is float:
+            value = "{:.2f}".format(float(value))
+        start = SPECIAL_TAGS[key]["start"]
+        end = SPECIAL_TAGS[key]["end"]
+        return f"{start}{value}{end}"
+```
+
+### Example Formatted Output
+
+```text
+[START_SMILES]CCCCCCOC(=O)NC1=CC=C(C=C1)N=NC2=CC=CC=C2[END_SMILES]
+[SAS]2.00[/SAS]
+[WEIGHT]325.10[/WEIGHT]
+[TPSA]63.07[/TPSA]
+[CLOGP]6.23[/CLOGP]
+[QED]0.46[/QED]
+[SIMILAR]CCCCOC(=O)NC1=CC=C(C=C1)N 0.70[/SIMILAR]
+[SYNONYM]p-Phenylazo carbanilic acid, n-hexyl ester[/SYNONYM]
+[NUMHDONORS]1[/NUMHDONORS]
+[NUMHACCEPTORS]4[/NUMHACCEPTORS]
+</s>
+```
+
+## Data Types
+
+The corpus supports different data types:
+
+```python chemlactica/utils/dataset_utils.py
+DIR_DATA_TYPES = ["pubchem", "assay", "assay-split", "custom"]
+```
+
+<AccordionGroup>
+  <Accordion title="PubChem Data" icon="database">
+    Standard PubChem molecular data with computed properties and similar molecules.
+  </Accordion>
+  
+  <Accordion title="Assay Data" icon="flask">
+    Experimental assay data with biological activity measurements:
+    
+    ```
+    [ASSAY_NAME]Assay Name[/ASSAY_NAME]
+    [ASSAY_DESC]Description[/ASSAY_DESC]
+    [VAR_NAME]Variable[/VAR_NAME]
+    [VAR_VAL]Value[/VAR_VAL]
+    ```
+  </Accordion>
+  
+  <Accordion title="Custom Data" icon="wrench">
+    User-provided molecular data in the same JSONL format.
+  </Accordion>
+</AccordionGroup>
+
+## Dataset Loading
+
+### For Pre-training
+
+```python chemlactica/get_dataset.py
+def get_dataset(
+    train_type,
+    training_data_dirs,
+    valid_data_dir,
+    dir_data_types,
+    train_config,
+    model_config,
+    shared_jsonl_files,
+    evaluate_only,
+    slurm_eval,
+    shuffle_buffer_size,
+):
+    if train_type == "pretrain":
+        assert len(training_data_dirs) == len(dir_data_types)
+        train_dataset_dict = {}
+        
+        for i, (training_data_dir, dir_data_type) in enumerate(
+            zip(training_data_dirs, dir_data_types)
+        ):
+            training_data_files = glob.glob(training_data_dir + "/*.jsonl")
+            dataset = IterableDataset.from_generator(
+                samples_generator,
+                gen_kwargs={
+                    "files": training_data_files,
+                    "shared_jsonl_files": shared_jsonl_files,
+                },
+            )
+            dataset = process_dataset(
+                dataset=dataset,
+                train_config=train_config,
+                model_config=model_config,
+                process_batch_sizes=(50, 50),
+                is_eval=False,
+                assay=is_assay_split,
+            )
+```
+
+### For Fine-tuning
+
+```python
+if train_type == "sft":
+    dataset = load_dataset(training_data_dirs[0])
+```
+
+## Tokenization
+
+### Custom Tokenizer
+
+ChemLactica uses specialized tokenizers optimized for chemical notation:
+
+```python chemlactica/utils/utils.py
+default_tokenizer_path = "./chemlactica/tokenizer/ChemLacticaTokenizer66"
+
+def get_tokenizer(tokenizer_path):
+    return create_tokenizer(tokenizer_path)
+
+def create_tokenizer(tokenizer_path):
+    tok = AutoTokenizer.from_pretrained(tokenizer_path)
+    tok.add_bos_token = False
+    tok.padding_side = "right"
+    return tok
+```
+
+### Vocabulary Size
+
+<CardGroup cols={2}>
+  <Card title="Chemlactica" icon="atom">
+    **50,000 tokens**
+    
+    Optimized for chemistry
+  </Card>
+  <Card title="Chemma" icon="atom">
+    **256,000 tokens**
+    
+    Larger vocabulary from Gemma
+  </Card>
+</CardGroup>
+
+### Special Tokens
+
+The tokenizer includes chemistry-specific special tokens:
+
+```python chemlactica/utils/utils.py
+def get_start2end_tags_map(tokenizer_path: str = default_tokenizer_path):
+    with open(os.path.join(tokenizer_path, "special_tokens_map.json"), "r") as _f:
+        special_tokens_map = json.load(_f)
+    additional_tokens = special_tokens_map.get("additional_special_tokens", None)
+    n = len(additional_tokens)
+    return {
+        additional_tokens[i]: additional_tokens[n // 2 + i] for i in range(n // 2)
+    } | {"[START_SMILES]": "[END_SMILES]"}
+```
+
+## Data Statistics
+
+### Corpus Coverage
+
+- **100M+ unique molecules** from PubChem
+- **40B tokens** total
+- **Multiple properties** per molecule (avg 10-15 properties)
+- **Similar molecules** included for ~70% of compounds
+- **Chemical synonyms** and IUPAC names when available
+
+### Property Distribution
+
+All molecules include:
+- SMILES notation (100%)
+- Core properties: SAS, WEIGHT, TPSA, CLOGP, QED (>95%)
+- Structural counts (>95%)
+- Similar molecules with Tanimoto scores (~70%)
+- Chemical names and synonyms (~60%)
+- Experimental properties (varies)
+
+## Training Configuration
+
+### Block Size
+
+```yaml
+block_size: 2048  # Maximum sequence length
+```
+
+<Tip>
+  The 2048 token context window is sufficient for most molecules and their associated properties. Very large molecules or those with many similar molecules may be truncated.
+</Tip>
+
+### Data Processing Parameters
+
+```python
+process_batch_sizes=(50, 50)  # Batch sizes for processing
+is_eval=False                  # Training vs evaluation mode
+assay=False                    # Standard PubChem vs assay data
+```
+
+## Accessing the Dataset
+
+### From Hugging Face
+
+```python
+from datasets import load_dataset
+
+# Load the full dataset
+dataset = load_dataset("yerevann/PubChemForLM")
+
+# Load streaming for large-scale training
+dataset = load_dataset("yerevann/PubChemForLM", streaming=True)
+```
+
+### Local JSONL Files
+
+```python
+import glob
+from datasets import load_dataset
+
+training_data_files = glob.glob("path/to/data/*.jsonl")
+dataset = load_dataset(
+    "text",
+    data_files={"train": training_data_files},
+    streaming=True
+)
+```
+
+## Data Quality
+
+<AccordionGroup>
+  <Accordion title="Validation" icon="check">
+    - All SMILES validated with RDKit
+    - Properties computed from validated molecular structures
+    - Similar molecules verified with Tanimoto similarity
+    - Duplicate molecules removed via canonical SMILES
+  </Accordion>
+  
+  <Accordion title="Preprocessing" icon="filter">
+    - Empty fields removed
+    - Float values rounded to 2 decimal places
+    - Related molecules limited to 10 per entry
+    - Property order randomized for training diversity
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Model Architectures" icon="atom" href="/concepts/models">
+    Learn about the models
+  </Card>
+  <Card title="Pre-training" icon="brain" href="/guides/pretraining">
+    Train your own model
+  </Card>
+  <Card title="Fine-tuning" icon="sliders" href="/guides/fine-tuning">
+    Adapt to your dataset
+  </Card>
+  <Card title="SMILES Format" icon="code" href="/concepts/smiles-format">
+    Understand molecular representation
+  </Card>
+</CardGroup>
