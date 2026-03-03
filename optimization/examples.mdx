@@ -456,9 +456,10 @@ class CustomOracle:
             
             # Calculate score for new molecule
             try:
-                # TODO: Implement your scoring function here
-                # Example: score = calculate_your_property(molecule.mol)
-                score = 0.0
+                # Calculate your custom property here
+                # For example: QED, SA score, or custom metric
+                from rdkit.Chem import QED
+                score = QED.qed(molecule.mol)
                 
             except Exception as e:
                 print(f"Error scoring {molecule.smiles}: {e}")
@@ -631,15 +632,18 @@ class DockingOracle:
         return oracle_scores
     
     def run_vina_docking(self, smiles: str) -> float:
-        """Run AutoDock Vina and return binding affinity."""
-        # TODO: Implement actual docking
-        # This is a placeholder - see AutoDock Vina documentation
-        # Steps:
-        # 1. Convert SMILES to 3D structure
-        # 2. Save as PDBQT
-        # 3. Run Vina
-        # 4. Parse output for binding affinity
-        raise NotImplementedError("Implement Vina docking")
+        """Run AutoDock Vina and return binding affinity.
+        
+        Note: This is a template. You'll need to:
+        1. Install AutoDock Vina and required dependencies
+        2. Convert SMILES to 3D structure using RDKit
+        3. Save structure as PDBQT format
+        4. Run Vina against your target protein
+        5. Parse binding affinity from output
+        
+        See AutoDock Vina documentation: https://autodock-vina.readthedocs.io/
+        """
+        raise NotImplementedError("Implement Vina docking - see method docstring for steps")
     
     def log_intermediate(self):
         scores = list(self.mol_buffer.values())

@@ -402,6 +402,23 @@ mol = Chem.MolFromSmiles("CCO")
 fp = get_morgan_fingerprint(mol)
 ```
 
+### `get_maccs_fingerprint(mol)`
+
+Generates a MACCS fingerprint for a molecule.
+
+**Parameters:**
+- `mol` (rdkit.Chem.Mol): RDKit molecule object
+
+**Returns:** `rdkit.DataStructs.ExplicitBitVect` - MACCS keys fingerprint
+
+```python
+from chemlactica.mol_opt.utils import get_maccs_fingerprint
+from rdkit import Chem
+
+mol = Chem.MolFromSmiles("CCO")
+fp = get_maccs_fingerprint(mol)
+```
+
 ### `tanimoto_dist_func(fing1, fing2, fingerprint="morgan")`
 
 Calculates Tanimoto similarity between two fingerprints.
@@ -426,8 +443,53 @@ print(f"Similarity: {similarity:.3f}")
 
 Sets random seeds for reproducibility across random, numpy, and PyTorch.
 
+**Parameters:**
+- `seed_value` (int): Random seed value
+
 ```python
 from chemlactica.mol_opt.utils import set_seed
 
 set_seed(42)
+```
+
+### `generate_random_number(lower, upper)`
+
+Generates a random float between lower and upper bounds.
+
+**Parameters:**
+- `lower` (float): Lower bound (inclusive)
+- `upper` (float): Upper bound (inclusive)
+
+**Returns:** `float` - Random number in [lower, upper]
+
+```python
+from chemlactica.mol_opt.utils import generate_random_number
+
+# Generate random SAS score
+sas = generate_random_number(2.0, 3.0)
+```
+
+### `create_prompt_with_similars(mol_entry, sim_range=None)`
+
+Creates a prompt string with similar molecules for generation.
+
+**Parameters:**
+- `mol_entry` (MoleculeEntry): Molecule entry with similar molecules
+- `sim_range` (list[float], optional): [min_sim, max_sim] range for similarity values
+
+**Returns:** `str` - Formatted prompt with SIMILAR tags
+
+*Source: `mol_opt/utils.py:112`*
+
+```python
+from chemlactica.mol_opt.utils import create_prompt_with_similars, MoleculeEntry
+
+mol = MoleculeEntry("CCO", score=0.85)
+mol.similar_mol_entries = [
+    MoleculeEntry("CCCO", score=0.80),
+    MoleculeEntry("CC(C)O", score=0.75)
+]
+
+prompt = create_prompt_with_similars(mol, sim_range=[0.4, 0.7])
+# Generates prompt with [SIMILAR]CCCO 0.65[/SIMILAR][SIMILAR]CC(C)O 0.58[/SIMILAR]
 ```

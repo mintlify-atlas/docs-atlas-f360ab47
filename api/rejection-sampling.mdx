@@ -8,9 +8,9 @@ Rejection sampling is an iterative fine-tuning strategy that generates molecules
 ## Main Function
 
 ```python
-from chemlactica.rejection_sampling_ft import fine_tune
+from chemlactica.rejection_sampling_ft import fine_tine
 
-def fine_tune(
+def fine_tine(
     from_pretrained: str,
     model_config_name: str,
     valid_data_dir: str,
@@ -219,10 +219,10 @@ scoring_config = ScoringConfig(
 
 ```python
 import torch
-from chemlactica.rejection_sampling_ft import fine_tune
+from chemlactica.rejection_sampling_ft import fine_tine
 
 # Configure rejection sampling fine-tuning
-fine_tune(
+fine_tine(
     from_pretrained="yerevann/chemlactica-125m",
     model_config_name="125m",
     valid_data_dir="./validation_data",
